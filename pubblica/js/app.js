@@ -2087,6 +2087,25 @@
     return tx;
   }
 
+  // Alcuni Excel (es. la "Lista movimenti" di Intesa dal sito) dichiarano un'area del foglio più piccola
+  // di quella reale (A1:J33 con 1.000 righe): la libreria leggerebbe solo le prime righe.
+  // Qui l'area viene ricalcolata dalle celle davvero presenti.
+  function fixSheetRange(ws) {
+    let maxR = 0, maxC = 0, any = false;
+    for (const k of Object.keys(ws)) {
+      if (k[0] === '!') continue;
+      const c = XLSX.utils.decode_cell(k);
+      if (c.r > maxR) maxR = c.r;
+      if (c.c > maxC) maxC = c.c;
+      any = true;
+    }
+    if (!any) return;
+    const cur = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+    if (maxR > cur.e.r || maxC > cur.e.c) {
+      ws['!ref'] = XLSX.utils.encode_range({ s: cur.s, e: { r: Math.max(maxR, cur.e.r), c: Math.max(maxC, cur.e.c) } });
+    }
+  }
+
   async function parseFile(file) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'csv' || ext === 'txt') {
@@ -2099,6 +2118,7 @@
       const wb = XLSX.read(await readAs(file, 'buffer'), { type: 'array' });
       let best = [];
       for (const name of wb.SheetNames) {
+        fixSheetRange(wb.Sheets[name]);
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
         const tx = Parser.rowsToTransactions(rows);
         if (tx.length + tx.pending > best.length + (best.pending || 0)) best = tx;
