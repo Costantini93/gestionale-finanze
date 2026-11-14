@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gestionale finanze</title>
+  <meta name="description" content="Abbonamenti, entrate e spese dal tuo estratto conto, con promemoria dei rinnovi.">
+  <meta name="theme-color" content="#0b0c18">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Finanze">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/theme.css">
+</head>
+<body class="locked">
+  <!-- Schermata di accesso: i dati sono cifrati e si aprono solo con la password -->
+  <div id="lock" class="lock">
+    <form id="lockForm" class="lock-box" autocomplete="on">
+      <div class="lock-icon"><svg class="ico"><use href="#i-lock"/></svg></div>
+      <h2 id="lockTitle">Gestionale finanze</h2>
+      <p id="lockHint" class="muted"></p>
+      <input type="text" name="username" value="gestionale-abbonamenti" autocomplete="username" hidden>
+      <input type="password" id="lockPw" placeholder="Password" required>
+      <input type="password" id="lockPw2" placeholder="Ripeti la password" autocomplete="new-password" hidden>
+      <p id="lockErr" class="lock-err" hidden></p>
+      <button class="btn" id="lockBtn" type="submit">Entra</button>
+      <button type="button" class="link small" id="forgotBtn" hidden>Ho dimenticato la password</button>
+    </form>
+  </div>
+
+  <!-- Icone (stile Feather, licenza MIT) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></symbol>
+      <symbol id="i-out" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></symbol>
+      <symbol id="i-in" viewBox="0 0 24 24"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+      <symbol id="i-bars" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></symbol>
+      <symbol id="i-trend" viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></symbol>
+      <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+      <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></symbol>
+      <symbol id="i-truck" viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-piggy" viewBox="0 0 24 24"><path d="M19 9c1 0 2 1 2 2.5S20 14 19 14l-1 3h-3v-2H9v2H6l-1-3c-1.5-1-2.5-2.5-2.5-4.5C2.5 7 5.5 5 9 5h4c2.5 0 4.5 1.5 5 4z"/><line x1="15" y1="9" x2="15.01" y2="9"/></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M3.5 17a9 9 0 1 1 17 0"/><line x1="12" y1="13" x2="16" y2="8"/><circle cx="12" cy="13" r="1.5"/></symbol>
+      <symbol id="i-loan" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><path d="M8 14h3m-3 3h6"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app">
+    <!-- Barra in alto -->
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Apri il menu"><svg class="ico"><use href="#i-menu"/></svg></button>
+      <a class="brand" href="#/dashboard"><svg class="ico"><use href="#i-wallet"/></svg> Gestionale <span>finanze</span></a>
+      <div class="top-actions">
+        <button class="top-btn" id="lockNowBtn" title="Blocca il gestionale (serve la password per rientrare)">
+          <svg class="ico"><use href="#i-lock"/></svg><span>Blocca</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Menu laterale -->
+    <nav class="sidebar" id="sidebar">
+      <a href="#/dashboard" data-page="dashboard"><svg class="ico"><use href="#i-home"/></svg>Dashboard</a>
+
+      <div class="nav-group">Abbonamenti</div>
+      <a href="#/abbonamenti" data-page="abbonamenti"><svg class="ico"><use href="#i-repeat"/></svg>I miei abbonamenti<span class="nav-badge" id="navSubs"></span></a>
+      <a href="#/rinnovi" data-page="rinnovi"><svg class="ico"><use href="#i-calendar"/></svg>Prossimi addebiti</a>
+      <a href="#/verifica" data-page="verifica"><svg class="ico"><use href="#i-alert"/></svg>Da verificare<span class="nav-badge warn" id="navSugg"></span></a>
+
+      <div class="nav-group">Movimenti</div>
+      <a href="#/uscite" data-page="uscite"><svg class="ico"><use href="#i-out"/></svg>Uscite</a>
+      <a href="#/entrate" data-page="entrate"><svg class="ico"><use href="#i-in"/></svg>Entrate</a>
+      <a href="#/contanti" data-page="contanti"><svg class="ico"><use href="#i-wallet"/></svg>Contanti</a>
+      <a href="#/cerca" data-page="cerca"><svg class="ico"><use href="#i-search"/></svg>Cerca movimenti</a>
+
+      <div class="nav-group">Analisi</div>
+      <a href="#/confronto" data-page="confronto"><svg class="ico"><use href="#i-bars"/></svg>Confronto mesi</a>
+      <a href="#/calendario" data-page="calendario"><svg class="ico"><use href="#i-calendar"/></svg>Calendario</a>
+      <a href="#/andamento" data-page="andamento"><svg class="ico"><use href="#i-trend"/></svg>Andamento</a>
+
+      <div class="nav-group">Risparmio</div>
+      <a href="#/risparmio" data-page="risparmio"><svg class="ico"><use href="#i-piggy"/></svg>Piano di risparmio</a>
+      <a href="#/limiti" data-page="limiti"><svg class="ico"><use href="#i-gauge"/></svg>I miei limiti<span class="nav-badge warn" id="navLimits"></span></a>
+      <a href="#/prestiti" data-page="prestiti"><svg class="ico"><use href="#i-loan"/></svg>Prestiti e rate</a>
+
+      <div class="nav-group">Categorie</div>
+      <a href="#/stipendio" data-page="stipendio"><svg class="ico"><use href="#i-briefcase"/></svg>Stipendio</a>
+      <a href="#/bonifici" data-page="bonifici"><svg class="ico"><use href="#i-send"/></svg>Bonifici</a>
+      <a href="#/bollette" data-page="bollette"><svg class="ico"><use href="#i-zap"/></svg>Bollette</a>
+      <a href="#/spesa" data-page="spesa"><svg class="ico"><use href="#i-cart"/></svg>Spesa</a>
+      <a href="#/delivery" data-page="delivery"><svg class="ico"><use href="#i-truck"/></svg>Delivery</a>
+
+      <div class="nav-group">Dati</div>
+      <a href="#/carica" data-page="carica"><svg class="ico"><use href="#i-upload"/></svg>Carica estratto conto</a>
+      <a href="#/impostazioni" data-page="impostazioni"><svg class="ico"><use href="#i-settings"/></svg>Impostazioni</a>
+      <p class="nav-version">Versione 32</p>
+    </nav>
+    <div class="nav-shade" id="navShade"></div>
+
+    <!-- Contenuto -->
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <div class="crumbs" id="crumbs"></div>
+          <h1 id="pageTitle">Dashboard</h1>
+        </div>
+        <label class="period" id="periodBox">Periodo
+          <select id="monthFilter"></select>
+        </label>
+      </div>
+      <div id="status" class="status" hidden></div>
+
+      <!-- ============ DASHBOARD ============ -->
+      <section class="page" data-page="dashboard" data-title="Dashboard" data-period>
+        <section class="card forecast" id="forecastCard" hidden></section>
+        <div class="kpis">
+          <div class="kpi"><span class="label">Entrate</span><span class="value pos" id="inTot">0,00 €</span><span class="hint">stipendi, rimborsi, accrediti</span></div>
+          <div class="kpi"><span class="label">Uscite</span><span class="value neg" id="outTot">0,00 €</span><span class="hint">esclusi risparmi e giroconti</span></div>
+          <div class="kpi"><span class="label">Differenza</span><span class="value" id="netTot">0,00 €</span><span class="hint" id="netHint">&nbsp;</span></div>
+          <div class="kpi"><span class="label">Abbonamenti al mese</span><span class="value accent" id="dashSubs">0,00 €</span><span class="hint" id="dashSubsHint">&nbsp;</span></div>
+        </div>
+
+        <section class="card empty-start" id="startCard" hidden>
+          <h2>Benvenuto</h2>
+          <p class="muted">Per iniziare carica l'estratto conto (CSV, Excel o PDF): trovo abbonamenti, entrate e spese.</p>
+          <a class="btn" href="#/carica">Carica estratto conto</a>
+        </section>
+
+        <section class="card alert-card" id="alertsCard" hidden>
+          <h2>Da controllare</h2>
+          <div id="alerts"></div>
+        </section>
+
+        <div class="grid-2">
+          <section class="card">
+            <div class="card-head"><h2>Prossimi addebiti</h2><a class="link small" href="#/rinnovi">Vedi tutti</a></div>
+            <div id="dashUpcoming" class="upcoming"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Dove vanno i soldi</h2><a class="link small" href="#/uscite">Dettaglio</a></div>
+            <div id="dashCats"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============ ABBONAMENTI ============ -->
+      <section class="page" data-page="abbonamenti" data-group="Abbonamenti" data-title="I miei abbonamenti">
+        <div class="kpis kpis-3">
+          <div class="kpi"><span class="label">Spesa mensile</span><span class="value accent" id="totMonth">0,00 €</span><span class="hint">somma degli abbonamenti attivi</span></div>
+          <div class="kpi"><span class="label">Spesa annua stimata</span><span class="value" id="totYear">0,00 €</span><span class="hint">mensile × 12</span></div>
+          <div class="kpi"><span class="label">Abbonamenti attivi</span><span class="value" id="countActive">0</span><span class="hint" id="countCancelled">&nbsp;</span></div>
+        </div>
+
+        <section class="card">
+          <div class="row-head">
+            <h2>Abbonamenti</h2>
+            <button class="btn ghost" id="addBtn">+ Aggiungi a mano</button>
+          </div>
+          <form id="addForm" class="add-form" hidden>
+            <input name="name" placeholder="Nome (es. Netflix)" required>
+            <input name="amount" placeholder="Importo €" inputmode="decimal" required>
+            <select name="frequency">
+              <option value="mensile">Mensile</option>
+              <option value="settimanale">Settimanale</option>
+              <option value="bimestrale">Bimestrale</option>
+              <option value="trimestrale">Trimestrale</option>
+              <option value="semestrale">Semestrale</option>
+              <option value="annuale">Annuale</option>
+            </select>
+            <input name="nextDate" type="date" title="Prossimo addebito (facoltativo)">
+            <input name="url" placeholder="Link disdetta (facoltativo)">
+            <button class="btn" type="submit">Salva</button>
+          </form>
+          <div id="list" class="list"></div>
+          <p id="empty" class="empty">Nessun abbonamento ancora. <a class="link" href="#/carica">Carica un estratto conto</a> per iniziare.</p>
+        </section>
+
+        <section class="card" id="monthsCard" hidden>
+          <h2>Addebiti per mese</h2>
+          <p class="muted">Quanto ti è stato effettivamente addebitato per gli abbonamenti attivi, mese per mese.</p>
+          <div id="months" class="months"></div>
+        </section>
+      </section>
+
+      <section class="page" data-page="rinnovi" data-group="Abbonamenti" data-title="Prossimi addebiti">
+        <section class="card" id="upcomingCard">
+          <div class="row-head">
+            <p class="muted" id="upcomingHint"></p>
+            <div class="row-actions">
+              <label class="inline">Avvisami
+                <select id="remindDays">
+                  <option value="1">1 giorno</option>
+                  <option value="2">2 giorni</option>
+                  <option value="3">3 giorni</option>
+                  <option value="7">7 giorni</option>
+                </select>
+                prima
+              </label>
+              <button class="btn ghost" id="icsAll">📅 Aggiungi tutti al calendario</button>
+            </div>
+          </div>
+          <div id="upcoming" class="upcoming"></div>
+        </section>
+      </section>
+
+      <section class="page" data-page="verifica" data-group="Abbonamenti" data-title="Da verificare">
+        <section class="card" id="suggCard" hidden>
+          <h2>Potrebbero essere abbonamenti</h2>
+          <p class="muted">Movimenti che potrebbero essere abbonamenti. Aggiungili se lo sono.</p>
+          <div id="sugg" class="list"></div>
+        </section>
+        <section class="card" id="deletedCard" hidden>
+          <h2>Eliminati (<span id="deletedCount">0</span>)</h2>
+          <p class="muted">Elementi che hai tolto dalla lista. Se ne hai eliminato uno per errore, ripristinalo:
+            se lo hai disdetto, dopo il ripristino segnalo con ✓.</p>
+          <div id="deleted" class="list"></div>
+        </section>
+        <p class="empty" id="verifyEmpty">Niente da verificare.</p>
+      </section>
+
+      <!-- ============ MOVIMENTI ============ -->
+      <section class="page" data-page="uscite" data-group="Movimenti" data-title="Uscite per categoria" data-period>
+        <section class="card">
+          <p class="muted">Tocca una categoria per vedere gli esercenti, poi un esercente per vedere i singoli movimenti. Se un esercente è nella categoria sbagliata, puoi spostarlo.</p>
+          <div id="cats" class="cats"></div>
+        </section>
+      </section>
+
+      <section class="page" data-page="entrate" data-group="Movimenti" data-title="Entrate per categoria" data-period>
+        <section class="card">
+          <p class="muted">Stipendio, bonifici ricevuti, rimborsi… Tocca una categoria per vedere da chi arrivano. Puoi spostare una voce nella categoria giusta.</p>
+          <div id="incCats" class="cats"></div>
+        </section>
+      </section>
+
+      <section class="page" data-page="contanti" data-group="Movimenti" data-title="Entrate in contanti">
+        <section class="card">
+          <h2>Aggiungi un'entrata in contanti</h2>
+          <p class="muted">Per i soldi che ricevi in contanti e che non passano dal conto (es. lavoro al bar). Puoi inserire anche date passate.</p>
+          <form id="cashForm" class="cash-form">
+            <label>Data <input type="date" name="date" required></label>
+            <label>Importo € <input name="amount" inputmode="decimal" placeholder="es. 50" required></label>
+            <label class="grow">Descrizione <input name="desc" list="cashDescs" placeholder="es. Lavoro al bar" required></label>
+            <datalist id="cashDescs"></datalist>
+            <button class="btn" type="submit">Aggiungi entrata</button>
+          </form>
+          <label class="check"><input type="checkbox" id="excludeDeposits">
+            Quando verso questi contanti sul conto, non contare il "Versamento contanti" come entrata (eviti di contarli due volte)</label>
+        </section>
+        <section class="card" id="cashList"></section>
+      </section>
+
+      <section class="page" data-page="cerca" data-group="Movimenti" data-title="Cerca movimenti" data-period>
+        <section class="card" id="searchCard">
+          <div class="search-bar">
+            <input type="search" id="searchInput" placeholder="Es. Amazon, Glovo, bonifico, 19,99…" autocomplete="off">
+            <select id="searchType">
+              <option value="all">Tutti</option>
+              <option value="out">Solo uscite</option>
+              <option value="in">Solo entrate</option>
+            </select>
+          </div>
+          <div id="searchResults"></div>
+        </section>
+      </section>
+
+      <!-- ============ ANALISI ============ -->
+      <section class="page" data-page="confronto" data-group="Analisi" data-title="Confronto con gli altri mesi" data-period>
+        <section class="card focus" id="compareCard"></section>
+      </section>
+
+      <section class="page" data-page="calendario" data-group="Analisi" data-title="Calendario dei soldi">
+        <section class="card" id="calendar"></section>
+        <section class="card">
+          <h2>Le tue abitudini</h2>
+          <div id="habits"></div>
+        </section>
+      </section>
+
+      <section class="page" data-page="andamento" data-group="Analisi" data-title="Entrate e uscite per mese">
+        <section class="card" id="trendCard">
+          <div class="legend"><span class="dot pos-bg"></span>Entrate <span class="dot neg-bg"></span>Uscite</div>
+          <div id="trend" class="trend"></div>
+        </section>
+      </section>
+
+      <!-- ============ RISPARMIO ============ -->
+      <section class="page" data-page="risparmio" data-group="Risparmio" data-title="Piano di risparmio">
+        <div class="kpis" id="savKpis"></div>
+        <section class="card" id="savRate"></section>
+        <section class="card" id="savPiggy"></section>
+        <section class="card" id="savEmergency"></section>
+        <section class="card" id="savGoals"></section>
+        <section class="card" id="savSim"></section>
+        <p class="small muted">Indicazioni di metodo calcolate sui tuoi movimenti, non consulenza finanziaria. Medie sugli ultimi 3 mesi con estratto conto.</p>
+      </section>
+      <section class="page" data-page="limiti" data-group="Risparmio" data-title="I miei limiti">
+        <section class="card quick-card">
+          <h2>Ho appena speso</h2>
+          <p class="muted small">Segna l'ordine appena lo fai: il limite si aggiorna subito. Quando carichi l'estratto conto, l'ordine viene riconosciuto e non viene contato due volte.</p>
+          <form id="quickForm" class="quick-form">
+            <label>Categoria <select name="cat" id="quickCat"></select></label>
+            <label>Importo € <input name="amount" inputmode="decimal" placeholder="es. 24,50" required></label>
+            <label>Data dell'ordine <input name="date" type="date" required></label>
+            <label class="grow">Nota <input name="note" placeholder="facoltativa, es. Glovo sushi"></label>
+            <button class="btn" type="submit">Segna spesa</button>
+          </form>
+        </section>
+        <div id="limitCards" class="limit-cards"></div>
+        <section class="card" id="quickList"></section>
+        <section class="card">
+          <h2>Nuovo limite</h2>
+          <form id="limitForm" class="cash-form">
+            <label>Categoria <select name="cat" id="limitCat"></select></label>
+            <label>Periodo <select name="period"><option value="week">a settimana</option><option value="month">al mese</option></select></label>
+            <label>Limite € <input name="amount" inputmode="decimal" placeholder="es. 35" required></label>
+            <button class="btn" type="submit">Aggiungi limite</button>
+          </form>
+          <p class="small muted" id="limitHint"></p>
+        </section>
+      </section>
+      <section class="page" data-page="prestiti" data-group="Risparmio" data-title="Prestiti e rate">
+        <div class="kpis" id="loanKpis"></div>
+        <section class="card" id="loanList"></section>
+        <section class="card" id="loanMonths"></section>
+        <section class="card">
+          <h2>Aggiungi un prestito</h2>
+          <p class="muted small">Copia i dati dal dettaglio del prestito nell'app della banca. Le rate compaiono nella previsione, nel calendario e nel piano di risparmio.</p>
+          <form id="loanForm" class="cash-form">
+            <label class="grow">Nome <input name="name" placeholder="es. Prestito auto" required></label>
+            <label>Importo richiesto € <input name="principal" inputmode="decimal" placeholder="es. 1.000" required></label>
+            <label>Rata € <input name="rate" inputmode="decimal" placeholder="es. 50" required></label>
+            <label>N. rate <input name="n" type="number" min="1" max="360" placeholder="es. 12" required></label>
+            <label>Prima rata <input name="first" type="date" required></label>
+            <label>Totale dovuto € <input name="total" inputmode="decimal" placeholder="facoltativo"></label>
+            <label>TAN % <input name="tan" inputmode="decimal" placeholder="facoltativo"></label>
+            <label>TAEG % <input name="taeg" inputmode="decimal" placeholder="facoltativo"></label>
+            <button class="btn" type="submit">Aggiungi prestito</button>
+          </form>
+        </section>
+      </section>
+
+      <!-- ============ CATEGORIE ============ -->
+      <section class="page" data-page="stipendio" data-group="Categorie" data-title="Stipendio" data-period>
+        <section class="card focus" id="focusStipendio"></section>
+      </section>
+      <section class="page" data-page="bonifici" data-group="Categorie" data-title="Bonifici" data-period>
+        <section class="card focus" id="bonificiCard"></section>
+      </section>
+      <section class="page" data-page="bollette" data-group="Categorie" data-title="Bollette" data-period>
+        <section class="card focus" id="focusBollette"></section>
+      </section>
+      <section class="page" data-page="spesa" data-group="Categorie" data-title="Spesa" data-period>
+        <section class="card focus" id="focusSpesa"></section>
+      </section>
+      <section class="page" data-page="delivery" data-group="Categorie" data-title="Delivery" data-period>
+        <section class="card focus" id="focusDelivery"></section>
+      </section>
+
+      <!-- ============ DATI ============ -->
+      <section class="page" data-page="carica" data-group="Dati" data-title="Carica estratto conto">
+        <section class="card upload" id="drop">
+          <input type="file" id="file" multiple accept=".csv,.txt,.xls,.xlsx,.pdf" hidden>
+          <div class="upload-body">
+            <svg class="ico ico-lg"><use href="#i-upload"/></svg>
+            <strong>Trascina qui l'estratto conto</strong>
+            <span>oppure <button class="link" id="pick">scegli i file</button> — CSV, Excel o PDF, anche più file insieme.
+              Puoi caricare nuovi estratti nel tempo: lo storico si allunga e i doppioni vengono scartati.</span>
+            <small>I file vengono letti solo sul tuo dispositivo: nessun dato viene inviato a internet.</small>
+          </div>
+        </section>
+        <section class="card" id="coverage" hidden></section>
+      </section>
+
+      <section class="page" data-page="impostazioni" data-group="Dati" data-title="Impostazioni">
+        <section class="card settings">
+          <h2>Sicurezza</h2>
+          <p class="muted">I dati sono cifrati con la tua password. Il gestionale si blocca da solo dopo 10 minuti di inattività.</p>
+          <button class="btn ghost" id="pwBtn">Cambia password</button>
+        </section>
+        <section class="card settings">
+          <h2>Backup</h2>
+          <p class="muted">Il backup serve anche per spostare i dati tra computer e telefono. Attenzione: il file di backup non è protetto da password.</p>
+          <div class="row-actions start">
+            <button class="btn ghost" id="exportBtn">Esporta backup</button>
+            <button class="btn ghost" id="importBtn">Importa backup</button>
+          </div>
+          <input type="file" id="importFile" accept=".json" hidden>
+        </section>
+        <section class="card settings danger-zone">
+          <h2>Cancella tutto</h2>
+          <p class="muted">Elimina movimenti, abbonamenti e impostazioni. La password resta la stessa.</p>
+          <button class="btn cancel" id="resetBtn">Cancella tutti i dati</button>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="pwDlg">
+    <form id="pwForm">
+      <h3>Cambia password</h3>
+      <label>Password attuale <input type="password" name="oldPw" autocomplete="current-password" required></label>
+      <label>Nuova password <input type="password" name="newPw" autocomplete="new-password" required></label>
+      <label>Ripeti la nuova password <input type="password" name="newPw2" autocomplete="new-password" required></label>
+      <p id="pwErr" class="lock-err" hidden></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn ghost" id="pwCancel">Annulla</button>
+        <button class="btn" type="submit">Cambia</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="editDlg">
+    <form method="dialog" id="editForm">
+      <h3>Modifica abbonamento</h3>
+      <label>Nome <input name="name" required></label>
+      <label>Importo € <input name="amount" inputmode="decimal" required></label>
+      <label>Frequenza
+        <select name="frequency">
+          <option value="mensile">Mensile</option>
+          <option value="settimanale">Settimanale</option>
+          <option value="bimestrale">Bimestrale</option>
+          <option value="trimestrale">Trimestrale</option>
+          <option value="semestrale">Semestrale</option>
+          <option value="annuale">Annuale</option>
+        </select>
+      </label>
+      <label>Prossimo addebito <input name="nextDate" type="date"></label>
+      <label>Attivo fino al <small>(vuoto = nessuna scadenza)</small> <input name="endDate" type="date"></label>
+      <label>Link disdetta <input name="url"></label>
+      <div class="dlg-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>Annulla</button>
+        <button class="btn" value="ok">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/vault.js"></script>
+  <script src="js/services.js"></script>
+  <script src="js/categories.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/detector.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
