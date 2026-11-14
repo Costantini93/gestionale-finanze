@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gestionale finanze</title>
   <meta name="description" content="Abbonamenti, entrate e spese dal tuo estratto conto, con promemoria dei rinnovi.">
-  <meta name="theme-color" content="#0b0c18">
+  <meta name="theme-color" content="#0E6B73">
+  <script src="js/theme-init.js"></script>
   <meta name="robots" content="noindex, nofollow">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
@@ -13,6 +14,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Finanze">
+  <link rel="preload" href="assets/fonts/bricolage-grotesque-latin-opsz-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/hanken-grotesk-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/theme.css">
 </head>
@@ -24,8 +27,10 @@
       <h2 id="lockTitle">Gestionale finanze</h2>
       <p id="lockHint" class="muted"></p>
       <input type="text" name="username" value="gestionale-abbonamenti" autocomplete="username" hidden>
-      <input type="password" id="lockPw" placeholder="Password" required>
-      <input type="password" id="lockPw2" placeholder="Ripeti la password" autocomplete="new-password" hidden>
+      <label class="lock-label" for="lockPw">Password</label>
+      <input type="password" id="lockPw" required>
+      <label class="lock-label" for="lockPw2" id="lockPw2Label" hidden>Ripeti la password</label>
+      <input type="password" id="lockPw2" autocomplete="new-password" hidden>
       <p id="lockErr" class="lock-err" hidden></p>
       <button class="btn" id="lockBtn" type="submit">Entra</button>
       <button type="button" class="link small" id="forgotBtn" hidden>Ho dimenticato la password</button>
@@ -56,6 +61,8 @@
       <symbol id="i-wallet" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></symbol>
       <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M3.5 17a9 9 0 1 1 17 0"/><line x1="12" y1="13" x2="16" y2="8"/><circle cx="12" cy="13" r="1.5"/></symbol>
       <symbol id="i-loan" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><path d="M8 14h3m-3 3h6"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
       <symbol id="i-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
     </defs>
   </svg>
@@ -63,10 +70,13 @@
   <div class="app">
     <!-- Barra in alto -->
     <header class="topbar">
-      <button class="icon-btn menu-btn" id="menuBtn" aria-label="Apri il menu"><svg class="ico"><use href="#i-menu"/></svg></button>
+      <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Apri il menu" aria-controls="sidebar" aria-expanded="false"><svg class="ico"><use href="#i-menu"/></svg></button>
       <a class="brand" href="#/dashboard"><svg class="ico"><use href="#i-wallet"/></svg> Gestionale <span>finanze</span></a>
       <div class="top-actions">
-        <button class="top-btn" id="lockNowBtn" title="Blocca il gestionale (serve la password per rientrare)">
+        <button class="theme-btn" id="themeBtn" type="button" aria-label="Passa al tema scuro" title="Passa al tema scuro">
+          <svg class="ico"><use href="#i-moon"/></svg>
+        </button>
+        <button class="top-btn" id="lockNowBtn" type="button" title="Blocca il gestionale (serve la password per rientrare)">
           <svg class="ico"><use href="#i-lock"/></svg><span>Blocca</span>
         </button>
       </div>
@@ -74,7 +84,7 @@
 
     <!-- Menu laterale -->
     <nav class="sidebar" id="sidebar">
-      <a href="#/dashboard" data-page="dashboard"><svg class="ico"><use href="#i-home"/></svg>Dashboard</a>
+      <a href="#/dashboard" data-page="dashboard"><svg class="ico"><use href="#i-home"/></svg>Oggi posso</a>
 
       <div class="nav-group">Abbonamenti</div>
       <a href="#/abbonamenti" data-page="abbonamenti"><svg class="ico"><use href="#i-repeat"/></svg>I miei abbonamenti<span class="nav-badge" id="navSubs"></span></a>
@@ -107,7 +117,7 @@
       <div class="nav-group">Dati</div>
       <a href="#/carica" data-page="carica"><svg class="ico"><use href="#i-upload"/></svg>Carica estratto conto</a>
       <a href="#/impostazioni" data-page="impostazioni"><svg class="ico"><use href="#i-settings"/></svg>Impostazioni</a>
-      <p class="nav-version">Versione 32</p>
+      <p class="nav-version">Versione 33</p>
     </nav>
     <div class="nav-shade" id="navShade"></div>
 
@@ -116,7 +126,7 @@
       <div class="page-head">
         <div>
           <div class="crumbs" id="crumbs"></div>
-          <h1 id="pageTitle">Dashboard</h1>
+          <h1 id="pageTitle">Oggi posso</h1>
         </div>
         <label class="period" id="periodBox">Periodo
           <select id="monthFilter"></select>
@@ -124,35 +134,103 @@
       </div>
       <div id="status" class="status" hidden></div>
 
-      <!-- ============ DASHBOARD ============ -->
-      <section class="page" data-page="dashboard" data-title="Dashboard" data-period>
-        <section class="card forecast" id="forecastCard" hidden></section>
-        <div class="kpis">
-          <div class="kpi"><span class="label">Entrate</span><span class="value pos" id="inTot">0,00 €</span><span class="hint">stipendi, rimborsi, accrediti</span></div>
-          <div class="kpi"><span class="label">Uscite</span><span class="value neg" id="outTot">0,00 €</span><span class="hint">esclusi risparmi e giroconti</span></div>
-          <div class="kpi"><span class="label">Differenza</span><span class="value" id="netTot">0,00 €</span><span class="hint" id="netHint">&nbsp;</span></div>
-          <div class="kpi"><span class="label">Abbonamenti al mese</span><span class="value accent" id="dashSubs">0,00 €</span><span class="hint" id="dashSubsHint">&nbsp;</span></div>
-        </div>
-
+      <!-- ============ OGGI POSSO (home) ============ -->
+      <!-- Banda con il numero di oggi, poi le giornate del periodo, poi azioni e riepiloghi. -->
+      <section class="page" data-page="dashboard" data-title="Oggi posso">
         <section class="card empty-start" id="startCard" hidden>
-          <h2>Benvenuto</h2>
-          <p class="muted">Per iniziare carica l'estratto conto (CSV, Excel o PDF): trovo abbonamenti, entrate e spese.</p>
-          <a class="btn" href="#/carica">Carica estratto conto</a>
+          <h2>Inizia dall'estratto conto</h2>
+          <p class="muted">Carica l'estratto conto (CSV, Excel o PDF): trovo abbonamenti, entrate e spese e calcolo quanto puoi spendere ogni giorno.</p>
+          <a class="btn" href="#/carica">Carica l'estratto conto</a>
         </section>
+
+        <section class="td-band" id="todayBand" aria-labelledby="tdLabel"></section>
 
         <section class="card alert-card" id="alertsCard" hidden>
           <h2>Da controllare</h2>
           <div id="alerts"></div>
         </section>
 
-        <div class="grid-2">
-          <section class="card">
-            <div class="card-head"><h2>Prossimi addebiti</h2><a class="link small" href="#/rinnovi">Vedi tutti</a></div>
+        <section class="td-sec" id="tdDaysSec" aria-labelledby="tdChartH">
+          <h2 id="tdChartH">Le giornate del periodo</h2>
+          <p class="td-sub">Ogni barra è quanto hai speso in un giorno, senza bollette, abbonamenti e rate. La linea tratteggiata è il budget di oggi.</p>
+          <div class="td-chartbox">
+            <div class="td-chart" id="tdChart" role="group" tabindex="0" aria-label="Spesa per giorno"><div id="tdChartSvg"></div></div>
+            <div class="td-tip" id="tdTip" hidden aria-live="polite"></div>
+          </div>
+          <p class="td-legend" aria-hidden="true">
+            <span><i style="background:var(--mark)"></i>Entro il budget</span>
+            <span><i style="background:var(--warn-mark)"></i>Sopra il budget</span>
+            <span><i style="background:var(--mark-today)"></i>Oggi</span>
+            <span><i class="dash"></i>Budget di oggi</span>
+          </p>
+          <details class="td-tbl">
+            <summary>Vedi i dati come tabella</summary>
+            <div class="td-tablewrap"><table>
+              <thead><tr><th scope="col">Giorno</th><th scope="col">Speso</th><th scope="col">Rispetto al budget di oggi</th></tr></thead>
+              <tbody id="tdTbody"></tbody>
+            </table></div>
+          </details>
+        </section>
+
+        <div class="td-sec td-cols">
+          <form class="td-panel" id="tdAddForm" novalidate>
+            <h2 class="td-ph">Aggiungi una spesa</h2>
+            <div class="td-stack">
+              <div>
+                <label class="lbl" for="tdAmount">Importo</label>
+                <div class="td-money"><input class="inp" id="tdAmount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-describedby="tdAmountErr"><i aria-hidden="true">€</i></div>
+                <p class="err" id="tdAmountErr" hidden></p>
+              </div>
+              <fieldset>
+                <legend>Categoria</legend>
+                <div class="td-chips" id="tdChips"></div>
+              </fieldset>
+              <div>
+                <label class="lbl" for="tdNote">Nota (facoltativa)</label>
+                <input class="inp" id="tdNote" name="note" maxlength="60" autocomplete="off" placeholder="Per esempio: caffè">
+              </div>
+              <button class="btn" type="submit">Aggiungi spesa</button>
+              <p class="td-foot">La spesa vale per oggi. Quando carichi l'estratto conto la riconosco e non la conto due volte.</p>
+            </div>
+          </form>
+
+          <div class="td-panel" id="tdCheckPanel">
+            <h2 class="td-ph">Prima di comprare</h2>
+            <label class="lbl" for="tdPrice">Prezzo</label>
+            <div class="td-money"><input class="inp" id="tdPrice" inputmode="decimal" autocomplete="off" placeholder="0,00"><i aria-hidden="true">€</i></div>
+            <div id="tdCheckOut" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="td-sec td-cols">
+          <section aria-labelledby="tdCatH">
+            <div class="td-head"><h2 id="tdCatH" class="td-ph">Categorie</h2><a class="link" href="#/uscite">Vedi le uscite</a></div>
+            <p class="td-sub">Quanto hai speso in ogni categoria da inizio periodo.</p>
+            <div id="tdCats"></div>
+          </section>
+          <section aria-labelledby="tdListH">
+            <div class="td-head"><h2 id="tdListH" class="td-ph">Ultime spese</h2><a class="link" href="#/cerca">Cerca movimenti</a></div>
+            <p class="td-sub">Le otto più recenti, comprese quelle che hai aggiunto qui.</p>
+            <ul class="td-list" id="tdList"></ul>
+          </section>
+        </div>
+
+        <div class="td-sec td-cols">
+          <section aria-labelledby="tdUpH">
+            <div class="td-head"><h2 id="tdUpH" class="td-ph">Prossimi addebiti</h2><a class="link" href="#/rinnovi">Vedi tutti</a></div>
+            <p class="td-sub">Abbonamenti nei prossimi 30 giorni.</p>
             <div id="dashUpcoming" class="upcoming"></div>
           </section>
-          <section class="card">
-            <div class="card-head"><h2>Dove vanno i soldi</h2><a class="link small" href="#/uscite">Dettaglio</a></div>
-            <div id="dashCats"></div>
+          <section aria-labelledby="tdSetH" id="tdSetSec">
+            <h2 id="tdSetH" class="td-ph">Parametri del periodo</h2>
+            <p class="td-sub">Il numero di oggi parte da qui. Cambia un valore e tutto si ricalcola.</p>
+            <form class="td-set" id="tdSetForm" novalidate>
+              <div><label class="lbl" for="tdBalance">Saldo del conto</label><input class="inp" id="tdBalance" name="balance" inputmode="decimal" autocomplete="off" placeholder="Per esempio: 342,83" aria-describedby="tdBalanceErr"><p class="err" id="tdBalanceErr" hidden></p></div>
+              <div><label class="lbl" for="tdPayDay">Giorno dello stipendio</label><input class="inp" id="tdPayDay" name="payDay" inputmode="numeric" autocomplete="off" placeholder="Da 1 a 31" aria-describedby="tdPayDayErr"><p class="err" id="tdPayDayErr" hidden></p></div>
+              <div><label class="lbl" for="tdReserve">Da mettere da parte</label><input class="inp" id="tdReserve" name="reserve" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-describedby="tdReserveErr"><p class="err" id="tdReserveErr" hidden></p></div>
+            </form>
+            <p class="td-pool" id="tdPool"></p>
+            <details class="td-planned" id="tdPlanned" hidden></details>
           </section>
         </div>
       </section>
@@ -409,6 +487,8 @@
       </section>
     </main>
   </div>
+
+  <div class="toastwrap" id="toastWrap" hidden><div class="toast" id="toast" role="status"></div></div>
 
   <dialog id="pwDlg">
     <form id="pwForm">
