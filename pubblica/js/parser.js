@@ -121,12 +121,13 @@
   }
 
   function mapColumns(header) {
-    const cols = { date: -1, desc: [], amount: -1, debit: -1, credit: -1, status: -1 };
+    const cols = { date: -1, desc: [], amount: -1, debit: -1, credit: -1, status: -1, cat: -1 };
     let valuta = -1;
     header.forEach((raw, i) => {
       const c = String(raw || '').trim().toLowerCase();
       if (!c) return;
       if (/contabilizz/.test(c)) return void (cols.status = i);        // es. "Contabilizzazione" (Intesa)
+      if (/^categori/.test(c) && cols.cat < 0) return void (cols.cat = i);  // categoria data dalla banca (es. Intesa)
       if (matchAny(c, H.valuta) && /data/.test(c)) { if (valuta < 0) valuta = i; return; }
       if (matchAny(c, H.date) && cols.date < 0) return void (cols.date = i);
       if (matchAny(c, H.debit) && cols.debit < 0) return void (cols.debit = i);
@@ -160,6 +161,8 @@
     // serve a capire se il file è stato esportato solo in parte.
     out.declared = null;
     out.pending = 0;
+    out.pendingTx = [];                       // movimenti non ancora contabilizzati (spese appena fatte)
+    out.hasStatus = cols.status >= 0;
     for (const r of rows.slice(0, h >= 0 ? h : 30)) {
       const i = r.findIndex(c => /movimenti selezionati/i.test(String(c)));
       if (i >= 0) { const n = r.slice(i + 1).map(Number).find(x => Number.isFinite(x) && x > 0); if (n) out.declared = n; }
@@ -168,7 +171,7 @@
       const date = parseDate(r[cols.date]);
       if (!date) continue;
       // Movimenti ancora in sospeso: arriveranno con l'estratto successivo, con la data definitiva
-      if (cols.status >= 0 && /non\s*contabilizz/i.test(String(r[cols.status]))) { out.pending++; continue; }
+      const pending = cols.status >= 0 && /non\s*contabilizz/i.test(String(r[cols.status]));
       let amount = null;
       if (cols.amount >= 0) amount = parseAmount(r[cols.amount]);
       if (amount === null || amount === 0) {
@@ -180,7 +183,11 @@
       if (amount === null || amount === 0) continue;
       const desc = cols.desc.map(i => String(r[i] || '').trim()).filter(Boolean).join(' - ');
       if (!desc || /^saldo/i.test(desc)) continue;
-      out.push({ date, desc, amount: Math.round(amount * 100) / 100 });
+      const t = { date, desc, amount: Math.round(amount * 100) / 100 };
+      const bankCat = cols.cat >= 0 ? String(r[cols.cat] || '').trim() : '';
+      if (bankCat) t.bankCat = bankCat;
+      if (pending) { out.pending++; out.pendingTx.push(t); continue; }
+      out.push(t);
     }
     return out;
   }

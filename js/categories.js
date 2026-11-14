@@ -114,7 +114,30 @@
     return b ? { name: b.name, search: b.keys[0].replace('*', '') } : null;
   }
 
-  const api = { ALL, INCOME, byId, categorize, categorizeIncome, brandOf, SUPERMARKETS, DELIVERY };
+  // Categoria scritta dalla banca nell'esportazione (es. Intesa: "Spese mediche", "Carburanti").
+  // Si usa solo quando la descrizione da sola non basta (il movimento finirebbe in "Altro").
+  // Le voci generiche della banca ("Altre uscite", "Tempo libero varie", "Addebiti vari") non portano a niente.
+  const BANK_OUT = [
+    [/ristorant|bar\b/, 'ristoranti'], [/alimentar|supermercat/, 'spesa'], [/tabacc/, 'tabacchi'],
+    [/medic|farmac|salute|sanit/, 'salute'], [/carburant|veicol|trasport|taxi|parchegg|pedagg|noleggi/, 'trasporti'],
+    [/abbigliament|hi-?tech|informatic|casa varie|cura della persona|regali|elettronic/, 'shopping'],
+    [/sport|corsi|libri|film|musica|viaggi|vacanz/, 'sport'], [/\btv\b|internet|telefon/, 'telefonia'],
+    [/gas|energia|acqua/, 'bollette'], [/affitt|condomin/, 'affitto'], [/mutuo|finanziament|rate/, 'finanziamenti'],
+    [/imposte|bolli|commission/, 'banca'], [/prelievi|prelievo/, 'prelievi'], [/salvadanaio|investiment/, 'giroconti'],
+    [/bonifici in uscita/, 'bonifici'],
+  ];
+  const BANK_IN = [
+    [/stipend|pension/, 'stipendio'], [/rimbors|storn/, 'rimborsi'], [/finanziament/, 'prestiti'],
+    [/salvadanaio|disinvestiment/, 'giroconti'], [/bonifici ricevuti|regali ricevuti/, 'bonifici_in'],
+  ];
+  function fromBank(label, income) {
+    const l = String(label || '').toLowerCase();
+    if (!l) return null;
+    const hit = (income ? BANK_IN : BANK_OUT).find(([re]) => re.test(l));
+    return hit ? hit[1] : null;
+  }
+
+  const api = { ALL, INCOME, byId, categorize, categorizeIncome, fromBank, brandOf, SUPERMARKETS, DELIVERY };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Categories = api;
 })(this);

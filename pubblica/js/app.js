@@ -27,6 +27,9 @@
     // limits: tetti di spesa per categoria ({ cat, period: 'week'|'month', amount })
     // quick:  spese segnate al momento (es. un ordine Glovo) in attesa dell'estratto conto: non sono movimenti
     limits: [], quick: [],
+    // pendingTx: spese "non contabilizzate" dell'ultima esportazione Excel; contano solo in "Oggi posso"
+    // finché la banca non le contabilizza. pendingAsOf: data dell'esportazione da cui arrivano.
+    pendingTx: [], pendingAsOf: null,
     // excludeDeposits: non contare i versamenti di contanti come entrate (sono già registrati a mano come contanti)
     settings: { remindDays: 2, excludeDeposits: false } });
   // Dal dettaglio prestito nell'app della banca (ottobre 2026): 9 rate mensili ciascuno
@@ -463,7 +466,8 @@
     const key = party(t).key;
     if (t.amount > 0) {
       if (key && state.catOverrides['in:' + key]) return state.catOverrides['in:' + key];
-      return Categories.categorizeIncome(Detector.normalize(t.desc));
+      const inc = Categories.categorizeIncome(Detector.normalize(t.desc));
+      return inc === 'altre_entrate' ? Categories.fromBank(t.bankCat, true) || inc : inc;
     }
     if (key && state.catOverrides[key]) return state.catOverrides[key];
     const sub = subTxs.get(t);
@@ -473,18 +477,43 @@
     const norm = Detector.normalize(t.desc.replace(/\(ctv\.?[\s\S]*$/i, ''));
     const cat = Categories.categorize(norm);
     if (cat === 'altro' && Detector.matchService(norm, t.amount)) return 'abbonamenti';    // es. un singolo addebito GitHub
-    return cat;
+    // La descrizione non basta: si usa la categoria scritta dalla banca nell'esportazione, se dice qualcosa
+    return cat === 'altro' ? Categories.fromBank(t.bankCat, false) || cat : cat;
   }
+
+  // Gli arrotondamenti del salvadanaio (decine di righe da pochi centesimi) si mostrano come una riga al mese.
+  // Solo negli elenchi: i movimenti salvati restano quelli della banca, uno per uno.
+  const isRoundup = t => /arrotondament/i.test(t.desc) && /salvadanaio/i.test(t.desc);
+  function groupRoundups(items, getT, make) {
+    const out = [], groups = {};
+    for (const it of items) {
+      const t = getT(it);
+      if (!isRoundup(t)) { out.push({ it }); continue; }
+      const k = t.date.slice(0, 7) + (t.amount < 0 ? '-' : '+');
+      if (!groups[k]) out.push(groups[k] = { first: it, n: 0, sum: 0, last: t.date });
+      const g = groups[k];
+      g.n++; g.sum += t.amount;
+      if (t.date > g.last) g.last = t.date;
+    }
+    return out.map(x => {
+      if (x.it !== undefined) return x.it;
+      if (x.n === 1) return x.first;
+      const month = monthLabel(x.last.slice(0, 7));
+      return make(x.first, { date: x.last, amount: Math.round(x.sum * 100) / 100, roundups: x.n,
+        desc: `${x.n} arrotondamenti nel salvadanaio a ${month}, ${x.sum < 0 ? 'accantonati' : 'ripresi'} insieme` });
+    });
+  }
+  const roundupName = t => `Arrotondamenti salvadanaio (${t.roundups})`;
 
   // Riga apribile: in chiusura mostra il riepilogo, aperta elenca i singoli movimenti con la data.
   // search: parola per "Cerca tutti i movimenti" (facoltativa).
   function drow(cls, summary, txs, search) {
-    const sorted = [...txs].sort((a, b) => b.date.localeCompare(a.date));
+    const sorted = groupRoundups([...txs].sort((a, b) => b.date.localeCompare(a.date)), t => t, (t0, t) => t);
     return `<details class="drow ${cls}">
       <summary>${summary}</summary>
       <ul class="tx-mini">${sorted.map(t => `<li>
         <span class="tx-date">${fmtDate(t.date)}</span>
-        <span class="tx-what">${esc(Detector.merchantText(t.desc).slice(0, 60))}</span>
+        <span class="tx-what">${esc(t.roundups ? roundupName(t) : Detector.merchantText(t.desc).slice(0, 60))}</span>
         <b class="${t.amount < 0 ? 'neg' : 'pos'}">${t.amount < 0 ? '−' : '+'}${eur.format(Math.abs(t.amount))}</b>
       </li>`).join('')}</ul>
       ${search ? `<button class="link small" data-search="${esc(search)}">Cerca tutti i movimenti</button>` : ''}
@@ -751,6 +780,23 @@
     return `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`;
   }
 
+  // Spese in sospeso non ancora arrivate come movimenti definitivi: lo stesso importo contabilizzato
+  // da 1 giorno prima a 6 giorni dopo vuol dire che è arrivata. Dopo 20 giorni si considera superata.
+  function livePending() {
+    const used = new Set(), today = todayIso();
+    const booked = planRows.filter(x => !x.t.manual && x.t.amount < 0);
+    return (state.pendingTx || []).filter(p => {
+      if (p.amount >= 0 || Detector.daysBetween(p.date, today) > 20) return false;
+      const hit = booked.find(x => {
+        if (used.has(x.t) || Math.abs(x.t.amount - p.amount) >= 0.01) return false;
+        const d = Detector.daysBetween(p.date, realWhen(x.t).date);
+        return d >= -1 && d <= 6;
+      });
+      if (hit) { used.add(hit.t); return false; }
+      return true;
+    });
+  }
+
   let tdModel = null;
   function todayModel(view) {
     const f = state.forecast, today = todayIso(), sal = salaryInfo();
@@ -763,9 +809,21 @@
     const matched = matchQuick();
     const dataEnd = planRows.reduce((m, x) => !x.t.manual && x.t.date > m ? x.t.date : m, '');
 
+    // Spese in sospeso in banca (dall'ultimo Excel) e spese aggiunte a mano: se una spesa a mano
+    // corrisponde a una in sospeso (importo vicino, da 1 giorno prima a 4 dopo) conta quella della banca.
+    const pend = livePending().map(t => ({ t, cat: txCategory(t, new Map()) })).filter(isVariable);
+    const usedPend = new Set();
+    const quickLeft = state.quick.filter(q => {
+      if (matched.has(q.id)) return false;
+      const p = pend.find(x => !usedPend.has(x) && Math.abs(-x.t.amount - q.amount) <= Math.max(1, q.amount * 0.15)
+        && (d => d >= -1 && d <= 4)(Detector.daysBetween(q.date, x.t.date)));
+      if (p) { usedPend.add(p); return false; }
+      return true;
+    });
     const spends = [
       ...planRows.filter(x => !x.t.manual && isVariable(x)).map(x => ({ date: realWhen(x.t).date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, order: 0 })),
-      ...state.quick.filter(q => !matched.has(q.id)).map(q => ({ date: q.date, amount: q.amount, cat: q.cat, name: q.note, quick: q, order: quickTime(q) })),
+      ...pend.map(x => ({ date: x.t.date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, pending: true, order: 1 })),
+      ...quickLeft.map(q => ({ date: q.date, amount: q.amount, cat: q.cat, name: q.note, quick: q, order: quickTime(q) })),
     ];
     const byDay = days.map(() => 0), byCat = {}, quickDays = new Set();
     for (const s of spends) {
@@ -773,7 +831,7 @@
       if (i < 0 || i > T) continue;
       byDay[i] += s.amount;
       byCat[s.cat] = (byCat[s.cat] || 0) + s.amount;
-      if (s.quick) quickDays.add(s.date);
+      if (s.quick || s.pending) quickDays.add(s.date);
     }
     const spentToday = byDay[T] || 0;
     const daysLeft = days.length - T;
@@ -786,8 +844,9 @@
     const bDate = f.balanceDate || today;
     const bAt = f.balanceAt || Date.parse(bDate + 'T23:59:59');
     const bankAfter = state.transactions.filter(t => !t.manual && t.date > bDate).reduce((s, t) => s + t.amount, 0);
-    const quickAfter = state.quick.filter(q => !matched.has(q.id) && quickTime(q) > bAt).reduce((s, q) => s + q.amount, 0);
-    m.balance = f.balance + bankAfter - quickAfter;
+    const quickAfter = quickLeft.filter(q => quickTime(q) > bAt).reduce((s, q) => s + q.amount, 0);
+    const pendAfter = pend.filter(x => x.t.date > bDate).reduce((s, x) => s - x.t.amount, 0);
+    m.balance = f.balance + bankAfter - quickAfter - pendAfter;
     m.balanceDate = bDate;
     m.balanceOld = Detector.daysBetween(bDate, today) >= 3 && !(dataEnd > bDate);
     m.planned = plannedCharges(view, today, next);
@@ -1000,7 +1059,7 @@
     }
     $('tdList').innerHTML = arr.map(s => {
       const title = esc(s.name || catLabel(s.cat));
-      const meta = (s.name ? esc(catLabel(s.cat)) + ', ' : '') + esc(relDay(s.date, m.today)) + (s.quick ? ', in attesa dell\'estratto conto' : '');
+      const meta = (s.name ? esc(catLabel(s.cat)) + ', ' : '') + esc(relDay(s.date, m.today)) + (s.quick ? ', in attesa dell\'estratto conto' : s.pending ? ', in sospeso in banca' : '');
       return `<li class="td-row"><div class="td-row-t"><div>${title}</div><div class="td-row-m">${meta}</div></div>
         <span class="td-row-a">${money(s.amount)}</span>
         ${s.quick ? `<button class="td-del" type="button" data-td-del="${esc(s.quick.id)}" aria-label="Elimina ${title}, ${money(s.amount)}">Elimina</button>` : '<span></span>'}</li>`;
@@ -1240,11 +1299,11 @@
     if (calDay && calDay.startsWith(calMonth)) {
       const info = byDay[calDay];
       const plan = future.filter(p => p.date === calDay);
-      const rows = info ? [...info.rows].sort((a, b) => (a.hour ?? 99) - (b.hour ?? 99)) : [];
+      const rows = info ? groupRoundups([...info.rows].sort((a, b) => (a.hour ?? 99) - (b.hour ?? 99)), x => x.t, (x, t) => ({ t, hour: null })) : [];
       detail = `<div class="cal-detail"><h3>${new Date(calDay + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
         ${rows.length || plan.length ? `<ul class="tx-mini">${rows.map(x => `<li>
             <span class="tx-date">${x.hour !== null ? String(x.hour).padStart(2, '0') + ':00' : '—'}</span>
-            <span class="tx-what">${esc(party(x.t).name)}</span>
+            <span class="tx-what">${esc(x.t.roundups ? roundupName(x.t) : party(x.t).name)}</span>
             <b class="${x.t.amount < 0 ? 'neg' : 'pos'}">${x.t.amount < 0 ? '−' : '+'}${eur.format(Math.abs(x.t.amount))}</b></li>`).join('')}
           ${plan.map(p => `<li class="planned"><span class="tx-date">previsto</span><span class="tx-what">${esc(p.name)}</span><b>−${eur.format(p.amount)}</b></li>`).join('')}</ul>`
           : '<p class="muted small">Nessun movimento in questo giorno.</p>'}</div>`;
@@ -1547,7 +1606,8 @@
 
     const out = rows.filter(x => x.t.amount < 0).reduce((s, x) => s - x.t.amount, 0);
     const inc = rows.filter(x => x.t.amount > 0).reduce((s, x) => s + x.t.amount, 0);
-    const shown = rows.slice(0, searchLimit);
+    const grouped = groupRoundups(rows, x => x.t, (x, t) => ({ t, cat: x.cat }));
+    const shown = grouped.slice(0, searchLimit);
     box.innerHTML = `
       <p class="search-sum"><b>${rows.length}</b> moviment${rows.length === 1 ? 'o' : 'i'}
         ${out ? ` · uscite <b class="neg">${eur.format(out)}</b>` : ''}${inc ? ` · entrate <b class="pos">${eur.format(inc)}</b>` : ''}
@@ -1558,14 +1618,14 @@
         return `<details class="tx">
           <summary>
             <span class="tx-date">${fmtDate(t.date)}</span>
-            <span class="tx-name">${esc(mk ? titleCase(mk) : Detector.merchantText(t.desc).slice(0, 40))}
+            <span class="tx-name">${esc(t.roundups ? roundupName(t) : mk ? titleCase(mk) : Detector.merchantText(t.desc).slice(0, 40))}
               <small><span class="dot" style="background:${info.color}"></span>${esc(info.name)}</small></span>
             <span class="tx-amt ${t.amount < 0 ? 'neg' : 'pos'}">${t.amount < 0 ? '−' : '+'}${eur.format(Math.abs(t.amount))}</span>
           </summary>
           <p class="tx-desc">${esc(t.desc)}</p>
         </details>`;
       }).join('')}</div>
-      ${rows.length > shown.length ? `<button class="btn ghost" id="searchMore">Mostra tutti (${rows.length})</button>` : ''}`;
+      ${grouped.length > shown.length ? `<button class="btn ghost" id="searchMore">Mostra tutti (${grouped.length})</button>` : ''}`;
   }
 
   // =====================================================================
@@ -2232,12 +2292,20 @@
         const fileId = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
         for (const t of tx) { t.desc = t.desc.slice(0, DESC_MAX); t.src = fileId; }
         const added = mergeTransactions(tx);
+        // Spese in sospeso: valgono quelle dell'esportazione più recente (le vecchie nel frattempo sono state contabilizzate)
+        if (tx.hasStatus) {
+          const asOf = [...tx, ...tx.pendingTx].reduce((m, t) => t.date > m ? t.date : m, '');
+          if (!state.pendingAsOf || asOf >= state.pendingAsOf) {
+            state.pendingTx = tx.pendingTx.map((t, i) => Object.assign(t, { desc: t.desc.slice(0, DESC_MAX), id: fileId + 'p' + i }));
+            state.pendingAsOf = asOf;
+          }
+        }
         const dates = tx.map(t => t.date).sort();
         state.files.push({ id: fileId, name: f.name, from: dates[0], to: dates[dates.length - 1], count: tx.length, added, addedAt: todayIso() });
         msgs.push(`<b>${esc(f.name)}</b>: ${tx.length} movimenti dal ${fmtDate(dates[0])} al ${fmtDate(dates[dates.length - 1])}` +
           (added < tx.length ? ` (${tx.length - added - fixedAmounts} già presenti, ignorati)` : '') +
           (fixedAmounts ? `. <b>Corretti ${fixedAmounts} importi</b> letti male in precedenza (es. stipendi sopra i 1.000 €).` : '') +
-          (tx.pending ? `. Saltati ${tx.pending} movimenti non ancora contabilizzati: arriveranno con il prossimo estratto.` : ''));
+          (tx.pending ? `. ${tx.pending} ${tx.pending === 1 ? 'spesa è ancora in sospeso' : 'spese sono ancora in sospeso'} in banca: ${tx.pending === 1 ? 'la conto' : 'le conto'} solo in "Oggi posso" finché non ${tx.pending === 1 ? 'arriva definitiva' : 'arrivano definitive'}.` : ''));
         ok = true;
       } catch (e) {
         msgs.push(`<b>${esc(f.name)}</b>: ${e.html || 'errore — ' + esc(e.message)}`);
