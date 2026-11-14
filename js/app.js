@@ -18,7 +18,8 @@
   // catOverrides: esercente -> categoria scelta dall'utente nella panoramica spese
   const empty = () => ({ transactions: [], files: [], overrides: {}, manual: [], accepted: [], ignored: [], catOverrides: {}, billTypes: {},
     // forecast: saldo inserito dall'utente, giorno dello stipendio, addebiti esclusi dalla previsione
-    forecast: { balance: null, balanceDate: null, payDay: null, excluded: {} },
+    // reserve: quanto mettere da parte fino al prossimo stipendio (tolto dal budget di oggi)
+    forecast: { balance: null, balanceDate: null, balanceAt: null, payDay: null, reserve: 0, excluded: {} },
     // savings: piano di risparmio (obiettivo % di risparmio, fondo di emergenza, obiettivi con scadenza)
     savings: { rateTarget: 10, emergency: { months: 3, saved: 0 }, goals: [] },
     // loans: prestiti inseriti a mano (rata, numero rate, prima scadenza, totale dovuto)
@@ -272,11 +273,9 @@
     $('deletedCard').hidden = view.deleted.length === 0;
     $('verifyEmpty').hidden = view.suggestions.length + view.deleted.length > 0;
     $('deletedCount').textContent = view.deleted.length;
-    // Contatori nel menu laterale e riquadro in dashboard
+    // Contatori nel menu laterale
     $('navSubs').textContent = active.length || '';
     $('navSugg').textContent = view.suggestions.length || '';
-    $('dashSubs').textContent = eur.format(total);
-    $('dashSubsHint').textContent = `${active.length} attiv${active.length === 1 ? 'o' : 'i'} · ${eur.format(total * 12)} all'anno`;
     $('deleted').innerHTML = view.deleted.map(s => `
       <div class="item" data-id="${esc(s.id)}">
         <div class="logo" style="background:${logoColor(s.name)}">${esc(s.name.charAt(0).toUpperCase())}</div>
@@ -544,12 +543,6 @@
     const inTot = rows.filter(x => x.t.amount > 0).reduce((s, x) => s + x.t.amount, 0);
     const outRows = rows.filter(x => x.t.amount < 0);
     const outTot = outRows.reduce((s, x) => s - x.t.amount, 0);
-    $('inTot').textContent = eur.format(inTot);
-    $('outTot').textContent = eur.format(outTot);
-    $('netTot').textContent = eur.format(inTot - outTot);
-    $('netTot').className = 'value ' + (inTot - outTot >= 0 ? 'pos' : 'neg');
-    $('netHint').textContent = !pm && months.length > 1
-      ? `media mensile: ${eur.format((inTot - outTot) / months.length)}` : '\u00a0';
 
     const inRows = rows.filter(x => x.t.amount > 0);
     const focusMonths = pm ? 1 : months.length;
@@ -572,18 +565,6 @@
 
     renderCatList($('cats'), outRows, outTot, openCats, Categories.ALL, '', 'Nessuna spesa nel periodo selezionato.');
 
-    // Dashboard: le 6 categorie di spesa più grandi del periodo
-    const catTotals = {};
-    for (const { t, cat } of outRows) catTotals[cat] = (catTotals[cat] || 0) - t.amount;
-    const topCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, 6);
-    $('dashCats').innerHTML = topCats.length ? topCats.map(([id, v]) => {
-      const info = Categories.byId[id] || Categories.byId.altro;
-      return `<div class="dash-cat">
-        <span><span class="dot" style="background:${info.color}"></span> ${esc(info.name)}</span>
-        <span class="cat-bar"><span style="width:${(v / topCats[0][1] * 100).toFixed(1)}%;background:${info.color}"></span></span>
-        <b>${eur.format(v)}</b><small>${outTot ? (v / outTot * 100).toFixed(0) : 0}%</small>
-      </div>`;
-    }).join('') : '<p class="muted">Nessuna spesa nel periodo selezionato.</p>';
     $('startCard').hidden = state.transactions.length > 0;
     renderCatList($('incCats'), inRows, inTot, openIncCats, Categories.INCOME, 'in:', 'Nessuna entrata nel periodo selezionato.');
 
@@ -607,7 +588,7 @@
       </div>`).join('');
 
     planRows = everything;
-    renderForecast(view);
+    renderToday(view);
     renderCalendar(view);
     renderSavings(view);
     renderSearch();
@@ -698,82 +679,465 @@
     return total / days;
   }
 
-  function renderForecast(view) {
-    const el = $('forecastCard');
-    if (!state.transactions.length) { el.hidden = true; return; }
-    el.hidden = false;
-    const f = state.forecast, today = todayIso();
-    const sal = salaryInfo();
-    const payday = nextPayday(sal.day, today);
-    const daysLeft = Math.max(1, Math.round(Detector.daysBetween(today, payday)));
-    const planned = plannedCharges(view, today, payday);
-    const included = planned.filter(p => !f.excluded[p.key]);
-    const fixedTot = included.reduce((s, p) => s + p.amount, 0);
-    const rate = dailyRate();
-    const settings = `
-      <form class="fc-form" id="fcForm">
-        <label>Saldo attuale del conto <input name="balance" inputmode="decimal" placeholder="es. 342,83" value="${f.balance !== null ? String(f.balance).replace('.', ',') : ''}"></label>
-        <label>Lo stipendio arriva il giorno <input name="payDay" type="number" min="1" max="31" value="${sal.day}"></label>
-        <button class="btn" type="submit">Aggiorna</button>
-      </form>`;
+  // =====================================================================
+  //  Home "Oggi posso": quanto puoi ancora spendere oggi, fino allo stipendio.
+  //  Periodo = dall'ultimo stipendio al giorno prima del prossimo.
+  //  Budget di oggi = (saldo a inizio giornata − addebiti previsti − quota da parte) ÷ giorni che mancano.
+  //  "Spese di tutti i giorni" = uscite variabili (senza bollette, abbonamenti, rate, bonifici…),
+  //  con la data reale dell'acquisto, più le spese aggiunte a mano non ancora nell'estratto conto.
+  // =====================================================================
+  const NB = ' ', MINUS = '−';
+  const num2 = new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = v => (v < -0.004 ? MINUS : '') + num2.format(Math.abs(v)) + NB + '€';
+  const money0 = v => Math.round(v).toLocaleString('it-IT') + NB + '€';
+  const dLong = iso => new Date(iso + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+  const parseMoney = v => { const n = Parser.parseAmount(String(v ?? '').replace(MINUS, '-')); return n === null || !isFinite(n) ? NaN : n; };
+  const toField = n => n === null || n === undefined ? '' : (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
+  const catLabel = id => (Categories.byId[id] || {}).name || 'Altro';
+  const quickTime = q => parseInt(String(q.id).slice(1), 36) || 0;     // gli id delle spese sono "q" + data in base 36
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (f.balance === null) {
-      el.innerHTML = `<h2>💸 Quanto posso spendere oggi?</h2>
-        <p class="muted">Inserisci il saldo attuale del conto (lo vedi nell'app della banca): calcolo quanto puoi spendere ogni giorno fino al prossimo stipendio.</p>${settings}`;
+  // Giorno dello stipendio in un mese (se il mese è più corto, l'ultimo giorno)
+  function paydayIn(y, m, day) {
+    const d = new Date(Date.UTC(y, m - 1, 1)), yy = d.getUTCFullYear(), mm = d.getUTCMonth() + 1;
+    const last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    return `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`;
+  }
+
+  let tdModel = null;
+  function todayModel(view) {
+    const f = state.forecast, today = todayIso(), sal = salaryInfo();
+    const next = nextPayday(sal.day, today);                            // primo giorno del periodo successivo
+    const [ny, nm] = next.split('-').map(Number);
+    const start = paydayIn(ny, nm - 1, sal.day);
+    const days = [];
+    for (let d = start; d < next && days.length < 40; d = addDays(d, 1)) days.push(d);
+    const T = Math.max(0, days.indexOf(today));
+    const matched = matchQuick();
+    const dataEnd = planRows.reduce((m, x) => !x.t.manual && x.t.date > m ? x.t.date : m, '');
+
+    const spends = [
+      ...planRows.filter(x => !x.t.manual && isVariable(x)).map(x => ({ date: realWhen(x.t).date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, order: 0 })),
+      ...state.quick.filter(q => !matched.has(q.id)).map(q => ({ date: q.date, amount: q.amount, cat: q.cat, name: q.note, quick: q, order: quickTime(q) })),
+    ];
+    const byDay = days.map(() => 0), byCat = {}, quickDays = new Set();
+    for (const s of spends) {
+      const i = days.indexOf(s.date);
+      if (i < 0 || i > T) continue;
+      byDay[i] += s.amount;
+      byCat[s.cat] = (byCat[s.cat] || 0) + s.amount;
+      if (s.quick) quickDays.add(s.date);
+    }
+    const spentToday = byDay[T] || 0;
+    const daysLeft = days.length - T;
+    const m = { today, start, next, days, T, byDay, byCat, quickDays, spends, dataEnd, spentToday, daysLeft, sal,
+      balance: null, pool: null, allow: null, remaining: null, planned: [], fixedTot: 0, reserve: f.reserve || 0 };
+    if (f.balance === null) return m;
+
+    // Saldo di adesso: quello inserito, più i movimenti arrivati dopo con l'estratto conto,
+    // meno le spese aggiunte a mano dopo averlo inserito.
+    const bDate = f.balanceDate || today;
+    const bAt = f.balanceAt || Date.parse(bDate + 'T23:59:59');
+    const bankAfter = state.transactions.filter(t => !t.manual && t.date > bDate).reduce((s, t) => s + t.amount, 0);
+    const quickAfter = state.quick.filter(q => !matched.has(q.id) && quickTime(q) > bAt).reduce((s, q) => s + q.amount, 0);
+    m.balance = f.balance + bankAfter - quickAfter;
+    m.balanceDate = bDate;
+    m.balanceOld = Detector.daysBetween(bDate, today) >= 3 && !(dataEnd > bDate);
+    m.planned = plannedCharges(view, today, next);
+    m.fixedTot = m.planned.filter(p => !f.excluded[p.key]).reduce((s, p) => s + p.amount, 0);
+    m.pool = m.balance + spentToday - m.fixedTot - m.reserve;           // disponibile da inizio giornata
+    m.allow = m.pool / daysLeft;
+    m.remaining = m.allow - spentToday;
+    return m;
+  }
+
+  function renderToday(view) {
+    const m = tdModel = todayModel(view);
+    renderTodayBand(m);
+    drawTodayChart(m);
+    renderTodayTable(m);
+    renderTodayChips(m);
+    renderTodayCats(m);
+    renderTodayList(m);
+    renderTodayCheck();
+    renderTodaySettings(m);
+  }
+
+  // ---------- Banda con il numero di oggi ----------
+  let heroShown = null, heroRaf = 0, meterShown = 0;
+  function paintHero(v) {
+    const s = num2.format(Math.abs(v)), k = s.lastIndexOf(',');
+    const i = $('tdHeroInt'), d = $('tdHeroDec');
+    if (i) { i.textContent = s.slice(0, k); d.textContent = s.slice(k); }
+  }
+  function setHero(v) {
+    cancelAnimationFrame(heroRaf);
+    if (heroShown === null || reduceMotion() || Math.abs(v - heroShown) < 0.005) { heroShown = v; paintHero(v); return; }
+    const from = heroShown, t0 = performance.now(), dur = 450;
+    const step = t => {
+      const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      heroShown = from + (v - from) * e; paintHero(heroShown);
+      if (p < 1) heroRaf = requestAnimationFrame(step); else { heroShown = v; paintHero(v); }
+    };
+    heroRaf = requestAnimationFrame(step);
+  }
+
+  function renderTodayBand(m) {
+    const el = $('todayBand');
+    const period = `<p class="td-period">Periodo dal ${fmtShort(m.start)} al ${fmtShort(addDays(m.next, -1))}</p>`;
+    if (m.allow === null) {
+      heroShown = null;
+      el.innerHTML = `<div class="td-setup">
+        ${period}
+        <h2 id="tdLabel">Quanto puoi spendere oggi?</h2>
+        <p>Scrivi il saldo che vedi nell'app della banca. Tolgo gli addebiti previsti fino allo stipendio e divido quello che resta per i giorni che mancano.</p>
+        <form id="tdSetupForm" novalidate>
+          <div class="td-set">
+            <div><label class="lbl" for="tdSetupBalance">Saldo del conto</label><input class="inp" id="tdSetupBalance" name="balance" inputmode="decimal" autocomplete="off" placeholder="Per esempio: 342,83" aria-describedby="tdSetupErr"></div>
+            <div><label class="lbl" for="tdSetupDay">Giorno dello stipendio</label><input class="inp" id="tdSetupDay" name="payDay" inputmode="numeric" autocomplete="off" value="${m.sal.day}"></div>
+          </div>
+          <p class="err" id="tdSetupErr" hidden></p>
+          <button class="btn" type="submit">Calcola il budget di oggi</button>
+        </form>
+      </div>`;
       return;
     }
-    const available = f.balance - fixedTot;
-    const perDay = available / daysLeft;
-    const endBalance = available - rate * daysLeft;
-    const stale = f.balanceDate && f.balanceDate < today;
+    const neg = m.remaining < -0.004;
+    const pct = m.allow > 0 ? Math.min(100, m.spentToday / m.allow * 100) : 100;
+    const left = m.pool - m.spentToday;
+    const payday = fmtShort(m.next);
+    const parts = [];
+    if (m.fixedTot) parts.push(`gli addebiti previsti (${money(m.fixedTot)})`);
+    if (m.reserve) parts.push(`quello che metti da parte (${money(m.reserve)})`);
+    const note = m.pool <= 0
+      ? `Gli addebiti previsti${m.reserve ? ' e la quota da parte' : ''} superano il saldo: fino allo stipendio del ${payday} non resta budget per le spese di tutti i giorni.`
+      : `Fino allo stipendio del ${payday} restano <b>${money(left)}</b> per le spese di tutti i giorni${parts.length ? ', tolti ' + parts.join(' e ') : ''}. Il budget di oggi li divide per i giorni che mancano.`;
+    const stale = m.balanceOld
+      ? `<p class="td-warn"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span>Il saldo è del ${fmtShort(m.balanceDate)}. <button type="button" class="link" data-td-balance>Aggiorna il saldo</button> per un numero preciso.</span></p>` : '';
+    const firstPaint = !$('tdHeroInt');
+    el.innerHTML = `
+      <div class="td-band-top"><p class="td-label" id="tdLabel">${neg ? 'Oggi hai superato il budget di' : 'Oggi puoi ancora spendere'}</p>${period}</div>
+      <p class="td-hero" aria-live="polite" aria-atomic="true"><span id="tdHeroInt"></span><span class="dec" id="tdHeroDec"></span><span class="cur">€</span></p>
+      <div class="td-meter${neg ? ' over' : ''}" role="presentation"><span id="tdMeter" style="transform:scaleX(${meterShown.toFixed(4)})"></span></div>
+      <dl class="td-stats">
+        <div><dt>Budget di oggi</dt><dd>${money(m.allow)}</dd></div>
+        <div><dt>Già speso oggi</dt><dd>${money(m.spentToday)}</dd></div>
+        <div><dt>Giorni allo stipendio</dt><dd>${m.daysLeft} ${m.daysLeft === 1 ? 'giorno' : 'giorni'}</dd></div>
+      </dl>
+      <p class="td-note">${note}</p>${stale}`;
+    if (firstPaint) heroShown = heroShown === null || reduceMotion() ? null : 0;
+    paintHero(heroShown === null ? Math.abs(m.remaining) : heroShown);
+    setHero(Math.abs(m.remaining));
+    meterShown = pct / 100;
+    requestAnimationFrame(() => requestAnimationFrame(() => { const b = $('tdMeter'); if (b) b.style.transform = `scaleX(${meterShown.toFixed(4)})`; }));
+  }
 
-    // Andamento previsto del saldo, giorno per giorno, fino allo stipendio (spesa media + addebiti previsti)
-    const pts = [];
-    let bal = f.balance;
-    for (let i = 0; i <= daysLeft; i++) {
-      const d = addDays(today, i);
-      if (i > 0) bal -= rate;
-      bal -= included.filter(p => p.date === d).reduce((s, p) => s + p.amount, 0);
-      pts.push({ d, bal });
+  // ---------- Grafico delle giornate ----------
+  let tdGeo = null, tdActive = null;
+  function dayState(m, i) {
+    const d = m.days[i];
+    if (i > m.T) return 'future';
+    if (state.transactions.length && m.dataEnd && d > m.dataEnd && !m.quickDays.has(d) && i < m.T) return 'unknown';
+    return 'known';
+  }
+  function drawTodayChart(m) {
+    const holder = $('tdChartSvg'), box = $('tdChart');
+    const N = m.days.length, W = Math.max(300, Math.floor(holder.clientWidth || box.clientWidth || 360)), H = 196;
+    const mg = { t: 22, r: 8, b: 28, l: 40 }, iw = W - mg.l - mg.r, bw = iw / N, ph = H - mg.t - mg.b;
+    const ref = m.allow !== null && m.allow > 0 ? m.allow : null;
+    let maxV = Math.max(ref ? ref * 2 : 0, ...m.byDay, 10) * 1.05;
+    const steps = [10, 20, 25, 50, 100, 200, 500, 1000];
+    let step = 1000;
+    for (const s of steps) if (maxV / s <= 4) { step = s; break; }
+    maxV = Math.ceil(maxV / step) * step;
+    const y = v => mg.t + ph * (1 - v / maxV);
+    tdGeo = { W, mg, bw };
+    let out = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">`;
+    for (let g = 0; g <= maxV; g += step) {
+      out += `<line x1="${mg.l}" x2="${W - mg.r}" y1="${y(g)}" y2="${y(g)}" style="stroke:var(--border)" stroke-width="1"/>`;
+      out += `<text class="ax" x="${mg.l - 8}" y="${y(g) + 4}" text-anchor="end">${g}</text>`;
     }
-    const W = 600, Hh = 130, pad = 8;
-    const vals = pts.map(p => p.bal).concat([0]);
-    const maxV = Math.max(...vals), minV = Math.min(...vals);
-    const x = i => pad + i * (W - 2 * pad) / Math.max(1, pts.length - 1);
-    const y = v => pad + (maxV - v) * (Hh - 2 * pad) / Math.max(1, maxV - minV);
-    const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.bal).toFixed(1)}`).join(' ');
-    const chargeDots = included.map(p => { const i = pts.findIndex(q => q.d === p.date); return i < 0 ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(pts[i].bal).toFixed(1)}" r="3.5"><title>${esc(p.name)} ${eur.format(p.amount)} il ${fmtDate(p.date)}</title></circle>`; }).join('');
-    const neg = endBalance < 0;
+    out += `<rect id="tdHl" x="0" y="${mg.t}" width="${bw}" height="${ph}" style="fill:var(--border)" opacity=".55" visibility="hidden"/>`;
+    for (let i = 0; i < N; i++) {
+      const x = mg.l + i * bw + 1, w = Math.max(2, bw - 2), base = y(0), v = m.byDay[i], st = dayState(m, i);
+      if (st === 'known' && v > 0.004) {
+        const h = Math.max(2, base - y(v)), r = Math.min(3, w / 2, h);
+        const col = i === m.T ? 'var(--mark-today)' : ref && v > ref ? 'var(--warn-mark)' : 'var(--mark)';
+        out += `<path d="M${x} ${base}V${base - h + r}Q${x} ${base - h} ${x + r} ${base - h}H${x + w - r}Q${x + w} ${base - h} ${x + w} ${base - h + r}V${base}Z" style="fill:${col}"/>`;
+        if (i === m.T) out += `<text class="ax" x="${x + w / 2}" y="${base - h - 6}" text-anchor="middle" style="fill:var(--text)">oggi</text>`;
+      } else {
+        out += `<rect x="${x}" y="${base - 2}" width="${w}" height="2" rx="1" style="fill:var(--border)"${st === 'unknown' ? ' opacity=".5"' : ''}/>`;
+        if (i === m.T) out += `<text class="ax" x="${x + w / 2}" y="${base - 8}" text-anchor="middle" style="fill:var(--text)">oggi</text>`;
+      }
+    }
+    if (ref) {
+      const ry = y(ref);
+      out += `<line x1="${mg.l}" x2="${W - mg.r}" y1="${ry}" y2="${ry}" style="stroke:var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+      out += `<text class="ax halo" x="${W - mg.r}" y="${ry - 6}" text-anchor="end">budget di oggi ${money0(ref)}</text>`;
+    }
+    for (let k = 0; k < N; k++) {
+      const d = m.days[k], dn = +d.slice(8, 10);
+      let lab = null, anchor = 'middle';
+      if (k === 0) { lab = fmtShort(d); anchor = 'start'; }
+      else if (dn === 1) lab = fmtShort(d);
+      else if (k % 5 === 0 && k < N - 2 && !m.days.slice(Math.max(0, k - 4), k + 5).some(x => x.endsWith('-01'))) lab = String(dn);
+      if (lab) out += `<text class="ax" x="${k === 0 ? mg.l : mg.l + k * bw + bw / 2}" y="${H - 8}" text-anchor="${anchor}">${lab}</text>`;
+    }
+    holder.innerHTML = out + '</svg>';
+    const over = ref ? m.byDay.filter((v, i) => i < m.T && v > ref).length : 0;
+    box.setAttribute('aria-label', `Spesa per giorno dal ${fmtShort(m.start)}. Oggi ${money(m.spentToday)}.` +
+      (ref ? ` ${over} ${over === 1 ? 'giorno' : 'giorni'} sopra il budget di oggi.` : '') + ' Usa le frecce sinistra e destra per scorrere i giorni.');
+    if (tdActive !== null) showTodayTip(tdActive);
+  }
+  function showTodayTip(i) {
+    const m = tdModel; if (!m || !tdGeo) return;
+    tdActive = i;
+    const tip = $('tdTip'), hl = $('tdHl'), st = dayState(m, i), v = m.byDay[i];
+    const ref = m.allow !== null && m.allow > 0 ? m.allow : null;
+    let body = `<b>${esc(dLong(m.days[i]))}</b>`;
+    if (st === 'future') body += 'Giorno non ancora arrivato';
+    else if (st === 'unknown') body += 'Estratto conto non ancora caricato';
+    else {
+      body += `Speso ${money(v)}`;
+      if (ref) body += `<br>${v > ref ? 'Sopra' : 'Sotto'} il budget di oggi di ${money(Math.abs(v - ref))}`;
+    }
+    tip.innerHTML = body; tip.hidden = false;
+    const tw = tip.offsetWidth, cx = tdGeo.mg.l + (i + .5) * tdGeo.bw;
+    tip.style.left = Math.min(tdGeo.W - tw / 2, Math.max(tw / 2, cx)) + 'px';
+    if (hl) { hl.setAttribute('x', tdGeo.mg.l + i * tdGeo.bw); hl.setAttribute('visibility', 'visible'); }
+  }
+  function hideTodayTip() {
+    tdActive = null; $('tdTip').hidden = true;
+    const hl = $('tdHl'); if (hl) hl.setAttribute('visibility', 'hidden');
+  }
+  function renderTodayTable(m) {
+    const ref = m.allow !== null && m.allow > 0 ? m.allow : null;
+    let rows = '';
+    for (let i = m.T; i >= 0; i--) {
+      const st = dayState(m, i), v = m.byDay[i];
+      const diff = st === 'unknown' ? 'Estratto conto non caricato' : ref ? (v - ref >= 0 ? '+' : MINUS) + num2.format(Math.abs(v - ref)) + NB + '€' : '–';
+      rows += `<tr><td>${esc(dLong(m.days[i]))}</td><td>${st === 'unknown' ? '–' : money(v)}</td><td>${diff}</td></tr>`;
+    }
+    $('tdTbody').innerHTML = rows;
+  }
 
-    el.innerHTML = `<h2>💸 Quanto posso spendere oggi?</h2>
-      <div class="fc-hero ${perDay < 0 ? 'bad' : perDay < rate ? 'warn' : 'good'}">
-        <div><span class="fc-big">${eur.format(Math.max(0, perDay))}</span><span class="fc-unit">al giorno</span></div>
-        <p>${perDay < 0
-          ? `Gli addebiti previsti superano il saldo di <b>${eur.format(-available)}</b> prima dello stipendio.`
-          : `per <b>${daysLeft} giorn${daysLeft === 1 ? 'o' : 'i'}</b>, fino allo stipendio del <b>${fmtShort(payday)}</b>${sal.amount ? ` (circa ${eur.format(sal.amount)})` : ''}.`}
-          Di solito spendi <b>${eur.format(rate)}</b> al giorno: a questo ritmo arrivi allo stipendio con
-          <b class="${neg ? 'neg' : 'pos'}">${neg ? '−' : ''}${eur.format(Math.abs(endBalance))}</b>.</p>
-      </div>
-      <svg class="fc-chart" viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none" role="img" aria-label="Saldo previsto fino allo stipendio">
-        <defs>
-          <linearGradient id="fcStroke" x1="0" x2="1" y1="0" y2="0"><stop offset="0" style="stop-color:var(--accent-3)"/><stop offset=".5" style="stop-color:var(--accent)"/><stop offset="1" style="stop-color:var(--accent-2)"/></linearGradient>
-          <linearGradient id="fcFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.35"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient>
-        </defs>
-        <polygon class="fc-area" points="${x(0).toFixed(1)},${Hh} ${line} ${x(pts.length - 1).toFixed(1)},${Hh}"/>
-        <line class="fc-zero" x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"/>
-        <polyline class="fc-line ${neg ? 'neg' : ''}" points="${line}"/>
-        <g class="fc-dots">${chargeDots}</g>
-      </svg>
-      <div class="fc-axis"><span>oggi ${eur.format(f.balance)}</span><span>${fmtShort(payday)}: ${neg ? '−' : ''}${eur.format(Math.abs(endBalance))}</span></div>
-      ${stale ? `<p class="small warn-text">Saldo inserito il ${fmtDate(f.balanceDate)}: aggiornalo per una stima precisa.</p>` : ''}
-      <details class="fc-details"${planned.length ? '' : ' hidden'}>
-        <summary>Addebiti previsti prima dello stipendio: <b>${eur.format(fixedTot)}</b> (${included.length})</summary>
-        <ul>${planned.map(p => `<li class="${f.excluded[p.key] ? 'off' : ''}">
-          <label><input type="checkbox" data-fc-key="${esc(p.key)}" ${f.excluded[p.key] ? '' : 'checked'}>
-          <span>${fmtShort(p.date)}</span> <span>${esc(p.name)}</span> <b>${eur.format(p.amount)}</b></label></li>`).join('')}</ul>
-        <p class="small muted">Togli la spunta agli addebiti che non arriveranno prima dello stipendio.</p>
-      </details>
-      ${settings}`;
+  // ---------- Aggiungi una spesa ----------
+  let tdCat = null;
+  function renderTodayChips(m) {
+    const since = addDays(m.today, -90), count = {};
+    for (const s of m.spends) if (s.date >= since) count[s.cat] = (count[s.cat] || 0) + 1;
+    const cats = LIMIT_CATS.filter(c => !NOT_VARIABLE.has(c.id) && c.id !== 'abbonamenti').sort((a, b) => (count[b.id] || 0) - (count[a.id] || 0)).slice(0, 8);
+    if (!tdCat || !cats.some(c => c.id === tdCat)) tdCat = cats[0] ? cats[0].id : 'altro';
+    $('tdChips').innerHTML = cats.map(c => `<label class="td-chip"><input type="radio" name="cat" value="${c.id}"${c.id === tdCat ? ' checked' : ''}><span>${esc(c.name)}</span></label>`).join('');
+  }
+
+  // ---------- Categorie e ultime spese ----------
+  function renderTodayCats(m) {
+    const rows = Object.entries(m.byCat).filter(([, v]) => v > 0.004).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    if (!rows.length) { $('tdCats').innerHTML = `<p class="td-empty">Nessuna spesa da inizio periodo. Quando ne aggiungi una, compare qui.</p>`; return; }
+    const total = Object.values(m.byCat).reduce((s, v) => s + v, 0);
+    $('tdCats').innerHTML = rows.map(([id, v]) => `<div class="td-cat">
+      <div class="td-cat-h"><span class="td-cat-n">${esc(catLabel(id))}</span><span class="td-cat-v">${money(v)}, ${Math.round(v / total * 100)}%</span></div>
+      <div class="td-track"><span style="width:${(v / rows[0][1] * 100).toFixed(1)}%"></span></div></div>`).join('');
+  }
+  function relDay(iso, today) {
+    if (iso === today) return 'oggi';
+    if (iso === addDays(today, -1)) return 'ieri';
+    return dLong(iso);
+  }
+  function renderTodayList(m) {
+    const arr = m.spends.filter(s => s.date <= m.today).sort((a, b) => b.date.localeCompare(a.date) || b.order - a.order).slice(0, 8);
+    if (!arr.length) {
+      $('tdList').innerHTML = `<li class="td-empty">Nessuna spesa ancora. Aggiungi la prima con il modulo qui sopra, oppure carica l'estratto conto.</li>`;
+      return;
+    }
+    $('tdList').innerHTML = arr.map(s => {
+      const title = esc(s.name || catLabel(s.cat));
+      const meta = (s.name ? esc(catLabel(s.cat)) + ', ' : '') + esc(relDay(s.date, m.today)) + (s.quick ? ', in attesa dell\'estratto conto' : '');
+      return `<li class="td-row"><div class="td-row-t"><div>${title}</div><div class="td-row-m">${meta}</div></div>
+        <span class="td-row-a">${money(s.amount)}</span>
+        ${s.quick ? `<button class="td-del" type="button" data-td-del="${esc(s.quick.id)}" aria-label="Elimina ${title}, ${money(s.amount)}">Elimina</button>` : '<span></span>'}</li>`;
+    }).join('');
+  }
+
+  // ---------- Prima di comprare ----------
+  function renderTodayCheck() {
+    const m = tdModel, out = $('tdCheckOut'), raw = $('tdPrice').value, p = parseMoney(raw);
+    if (!m) return;
+    if (m.allow === null) { out.innerHTML = `<p class="td-hint">Scrivi il saldo del conto qui sopra: poi ti dico come cambia il budget se compri qualcosa.</p>`; return; }
+    if (!raw.trim() || isNaN(p) || p <= 0) {
+      out.innerHTML = `<p class="td-hint">${raw.trim() ? 'Scrivi un prezzo maggiore di zero, per esempio 24,90.' : 'Scrivi un prezzo per vedere come cambia il numero di oggi.'}</p>`;
+      return;
+    }
+    const after = m.remaining - p;
+    let html = `<dl class="td-res"><div><dt>Oggi ti resterebbero</dt><dd class="${after < 0 ? 'neg' : ''}">${money(after)}<small>${after < 0 ? 'oltre il budget di oggi' : 'entro il budget di oggi'}</small></dd></div>`;
+    if (m.daysLeft > 1) {
+      const rest = m.pool - m.spentToday, cur = rest / (m.daysLeft - 1), nw = (rest - p) / (m.daysLeft - 1);
+      html += `<div><dt>Budget al giorno da domani</dt><dd>${money(nw)}<small>senza questo acquisto ${money(cur)}</small></dd></div>`;
+    }
+    if (m.allow > 0) {
+      const d = p / m.allow;
+      html += `<div><dt>Equivale a</dt><dd>${d.toLocaleString('it-IT', { maximumFractionDigits: 1 })} ${Math.abs(d - 1) < 0.05 ? 'giorno' : 'giorni'}<small>del tuo budget di oggi</small></dd></div>`;
+    }
+    out.innerHTML = html + '</dl>';
+  }
+
+  // ---------- Parametri del periodo ----------
+  function renderTodaySettings(m) {
+    const f = state.forecast, fill = (id, v) => { const el = $(id); if (document.activeElement !== el && el.getAttribute('aria-invalid') !== 'true') el.value = v; };
+    fill('tdBalance', toField(f.balance));
+    fill('tdPayDay', String(m.sal.day));
+    fill('tdReserve', toField(f.reserve || 0));
+    $('tdPool').innerHTML = m.pool === null
+      ? 'Scrivi il saldo per calcolare il budget.'
+      : `Per le spese di tutti i giorni fino al ${fmtShort(m.next)}: <b>${money(m.pool)}</b>` +
+        (m.pool < 0 ? `<br><span class="err">Gli addebiti superano il saldo. Togli quelli che non arriveranno o riduci la quota da parte.</span>` : '');
+    const det = $('tdPlanned'), wasOpen = det.open;
+    det.hidden = m.allow === null || !m.planned.length;
+    if (det.hidden) return;
+    const on = m.planned.filter(p => !f.excluded[p.key]);
+    det.innerHTML = `<summary>Addebiti previsti prima dello stipendio: ${money(m.fixedTot)} (${on.length})</summary>
+      <ul>${m.planned.map((p, i) => `<li class="${f.excluded[p.key] ? 'off' : ''}"><label><input type="checkbox" data-fc-key="${esc(p.key)}"${f.excluded[p.key] ? '' : ' checked'}>
+        <span>${fmtShort(p.date)}</span><span>${esc(p.name)}</span><b>${money(p.amount)}</b></label></li>`).join('')}</ul>
+      <p class="td-foot">Togli la spunta agli addebiti che non arriveranno prima dello stipendio.</p>`;
+    det.open = wasOpen;
+  }
+
+  // ---------- Avviso in basso con "Annulla" ----------
+  let toastTimer = 0;
+  function toast(msg, undo) {
+    const w = $('toastWrap'), t = $('toast');
+    t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="link" type="button" id="toastUndo">Annulla</button>' : ''}`;
+    w.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { w.hidden = true; }, 6000);
+    if (undo) $('toastUndo').onclick = () => { w.hidden = true; undo(); };
+  }
+
+  function setFieldErr(input, errEl, msg) {
+    if (msg) { errEl.textContent = msg; errEl.hidden = false; input.setAttribute('aria-invalid', 'true'); }
+    else { errEl.hidden = true; input.removeAttribute('aria-invalid'); }
+  }
+  let tdSaveTimer = 0;
+  const saveSoon = () => { clearTimeout(tdSaveTimer); tdSaveTimer = setTimeout(save, 600); };
+
+  function wireToday() {
+    // Aggiungi una spesa: vale per oggi; finisce fra le "spese segnate" della pagina I miei limiti
+    const amount = $('tdAmount'), amountErr = $('tdAmountErr');
+    amount.addEventListener('input', () => { if (!amountErr.hidden) setFieldErr(amount, amountErr, ''); });
+    amount.addEventListener('blur', () => {
+      const v = parseMoney(amount.value);
+      if (amount.value.trim() && (isNaN(v) || v <= 0)) setFieldErr(amount, amountErr, 'Scrivi un importo maggiore di zero, per esempio 12,50.');
+    });
+    $('tdChips').addEventListener('change', e => { if (e.target.name === 'cat') tdCat = e.target.value; });
+    $('tdAddForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const v = parseMoney(amount.value);
+      if (isNaN(v) || v <= 0) { setFieldErr(amount, amountErr, 'Scrivi un importo maggiore di zero, per esempio 12,50.'); amount.focus(); return; }
+      const item = { id: 'q' + Date.now().toString(36), cat: tdCat, amount: Math.round(Math.abs(v) * 100) / 100, date: todayIso(), note: $('tdNote').value.trim() };
+      state.quick.push(item);
+      save();
+      amount.value = $('tdNote').value = '';
+      setFieldErr(amount, amountErr, '');
+      render();
+      toast(`Spesa aggiunta: ${money(item.amount)}.`, () => { state.quick = state.quick.filter(q => q.id !== item.id); save(); render(); });
+      amount.focus();
+    });
+    $('tdList').addEventListener('click', e => {
+      const b = e.target.closest('[data-td-del]');
+      if (!b) return;
+      const item = state.quick.find(q => q.id === b.dataset.tdDel);
+      if (!item) return;
+      state.quick = state.quick.filter(q => q !== item);
+      save(); render();
+      toast('Spesa eliminata.', () => { state.quick.push(item); save(); render(); });
+      $('tdAmount').focus();
+    });
+    $('tdPrice').addEventListener('input', renderTodayCheck);
+
+    // Prima volta: saldo e giorno dello stipendio dentro la banda
+    $('todayBand').addEventListener('submit', e => {
+      if (e.target.id !== 'tdSetupForm') return;
+      e.preventDefault();
+      const f = e.target, bal = parseMoney(f.balance.value), day = parseInt(f.payDay.value, 10);
+      const err = $('tdSetupErr');
+      if (isNaN(bal)) { setFieldErr(f.balance, err, 'Scrivi il saldo in euro, per esempio 342,83. Se il conto è in rosso, metti il meno davanti.'); f.balance.focus(); return; }
+      if (!(day >= 1 && day <= 31)) { setFieldErr(f.payDay, err, 'Scrivi il giorno dello stipendio con un numero da 1 a 31.'); f.payDay.focus(); return; }
+      Object.assign(state.forecast, { balance: bal, balanceDate: todayIso(), balanceAt: Date.now(), payDay: day });
+      save();
+      renderToday(view);
+      $('tdLabel').setAttribute('tabindex', '-1');
+      $('tdLabel').focus();
+    });
+    $('todayBand').addEventListener('input', e => {
+      const err = $('tdSetupErr');
+      if (err && !err.hidden && e.target.getAttribute('aria-invalid') === 'true') setFieldErr(e.target, err, '');
+    });
+    $('todayBand').addEventListener('click', e => {
+      if (!e.target.closest('[data-td-balance]')) return;
+      $('tdBalance').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+      $('tdBalance').focus({ preventScroll: true });
+      $('tdBalance').select();
+    });
+
+    // Parametri: ogni valore valido ricalcola subito; gli errori compaiono quando lasci il campo
+    const rules = {
+      tdBalance: { err: 'tdBalanceErr', parse: v => parseMoney(v), ok: n => !isNaN(n), msg: 'Scrivi il saldo in euro, per esempio 342,83. Se il conto è in rosso, metti il meno davanti.',
+        set: n => Object.assign(state.forecast, { balance: n, balanceDate: todayIso(), balanceAt: Date.now() }) },
+      tdPayDay: { err: 'tdPayDayErr', parse: v => Number(String(v).trim()), ok: n => Number.isInteger(n) && n >= 1 && n <= 31, msg: 'Scrivi un giorno da 1 a 31.',
+        set: n => { state.forecast.payDay = n; } },
+      tdReserve: { err: 'tdReserveErr', parse: v => String(v).trim() === '' ? 0 : parseMoney(v), ok: n => !isNaN(n) && n >= 0, msg: 'Scrivi una cifra uguale o maggiore di zero, per esempio 50.',
+        set: n => { state.forecast.reserve = Math.round(n * 100) / 100; } },
+    };
+    const sf = $('tdSetForm');
+    sf.addEventListener('submit', e => e.preventDefault());
+    sf.addEventListener('input', e => {
+      const r = rules[e.target.id]; if (!r) return;
+      const n = r.parse(e.target.value);
+      if (!r.ok(n)) return;
+      setFieldErr(e.target, $(r.err), '');
+      r.set(n); saveSoon(); renderToday(view);
+    });
+    sf.addEventListener('focusout', e => {
+      const r = rules[e.target.id]; if (!r) return;
+      if (e.target.id === 'tdBalance' && !e.target.value.trim() && state.forecast.balance === null) return;
+      const ok = r.ok(r.parse(e.target.value));
+      setFieldErr(e.target, $(r.err), ok ? '' : r.msg);
+      if (ok) renderToday(view);
+    });
+    $('tdPlanned').addEventListener('change', e => {
+      const box = e.target.closest('[data-fc-key]');
+      if (!box) return;
+      if (box.checked) delete state.forecast.excluded[box.dataset.fcKey];
+      else state.forecast.excluded[box.dataset.fcKey] = true;
+      save();
+      renderToday(view);
+      const again = document.querySelector(`[data-fc-key="${CSS.escape(box.dataset.fcKey)}"]`);
+      if (again) again.focus();
+    });
+
+    // Grafico: tocco, mouse e frecce della tastiera
+    const ch = $('tdChart');
+    const idxFromX = x => { const r = $('tdChartSvg').getBoundingClientRect(); return Math.max(0, Math.min(tdModel.days.length - 1, Math.floor((x - r.left - tdGeo.mg.l) / tdGeo.bw))); };
+    ch.addEventListener('pointermove', e => { if (tdGeo && tdModel) showTodayTip(idxFromX(e.clientX)); });
+    ch.addEventListener('pointerdown', e => { if (tdGeo && tdModel) showTodayTip(idxFromX(e.clientX)); });
+    ch.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTodayTip(); });
+    ch.addEventListener('blur', hideTodayTip);
+    ch.addEventListener('keydown', e => {
+      if (!tdModel) return;
+      let i = tdActive === null ? tdModel.T : tdActive;
+      if (e.key === 'ArrowRight') i = Math.min(tdModel.days.length - 1, i + 1);
+      else if (e.key === 'ArrowLeft') i = Math.max(0, i - 1);
+      else if (e.key === 'Escape') { hideTodayTip(); return; }
+      else return;
+      e.preventDefault(); showTodayTip(i);
+    });
+    let lastW = 0, rt = 0;
+    if (window.ResizeObserver) new ResizeObserver(() => {
+      const w = Math.floor(ch.clientWidth);
+      if (!w || w === lastW || !tdModel) return;
+      lastW = w; clearTimeout(rt); rt = setTimeout(() => drawTodayChart(tdModel), 60);
+    }).observe(ch);
   }
 
   // Calendario del mese: entrate, uscite, addebiti previsti, intensità di spesa e abitudini.
@@ -1835,6 +2199,7 @@
     $('periodBox').hidden = !page.hasAttribute('data-period');
     document.title = page.dataset.title + ' · Gestionale finanze';
     document.body.classList.remove('nav-open');
+    $('menuBtn').setAttribute('aria-expanded', 'false');
     window.scrollTo(0, 0);
     countUp(page);
   }
@@ -1843,7 +2208,7 @@
   // Si ferma da solo se nel frattempo la pagina viene ridisegnata con un valore nuovo.
   function countUp(page) {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    for (const el of page.querySelectorAll('.kpi .value, .fc-big')) {
+    for (const el of page.querySelectorAll('.kpi .value')) {
       const final = el.textContent.trim();
       const m = final.match(/^([−-]?)([\d.]+(?:,\d+)?)\s*(€|%)?$/);
       if (!m) continue;
@@ -1868,30 +2233,34 @@
   showPage();
 
   // Menu a scomparsa su schermi piccoli
-  $('menuBtn').onclick = () => document.body.classList.toggle('nav-open');
-  $('navShade').onclick = () => document.body.classList.remove('nav-open');
+  const setNav = open => { document.body.classList.toggle('nav-open', open); $('menuBtn').setAttribute('aria-expanded', String(open)); };
+  $('menuBtn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
+  $('navShade').onclick = () => setNav(false);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { setNav(false); $('menuBtn').focus(); } });
 
-  // Previsione: saldo e giorno dello stipendio, addebiti da includere o escludere
-  $('forecastCard').addEventListener('submit', e => {
-    if (e.target.id !== 'fcForm') return;
-    e.preventDefault();
-    const bal = Parser.parseAmount(e.target.balance.value);
-    const day = Math.min(31, Math.max(1, parseInt(e.target.payDay.value, 10) || 1));
-    if (bal === null) return alert('Inserisci il saldo, per esempio 342,83 (con il meno davanti se il conto è in rosso).');
-    Object.assign(state.forecast, { balance: bal, balanceDate: todayIso(), payDay: day });
-    save();
-    renderForecast(view);
-    renderCalendar(view);
-  });
-  $('forecastCard').addEventListener('change', e => {
-    const box = e.target.closest('[data-fc-key]');
-    if (!box) return;
-    if (box.checked) delete state.forecast.excluded[box.dataset.fcKey];
-    else state.forecast.excluded[box.dataset.fcKey] = true;
-    save();
-    renderForecast(view);
-    $('forecastCard').querySelector('.fc-details').open = true;
-  });
+  // Tema chiaro / scuro: la scelta resta salvata su questo dispositivo (non è un dato personale)
+  const isDark = () => {
+    const t = document.documentElement.getAttribute('data-theme');
+    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+  function themeLabel() {
+    const dark = isDark(), l = dark ? 'Passa al tema chiaro' : 'Passa al tema scuro';
+    $('themeBtn').setAttribute('aria-label', l);
+    $('themeBtn').title = l;
+    $('themeBtn').querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+    document.querySelector('meta[name="theme-color"]').content = dark ? '#112326' : '#0E6B73';
+  }
+  $('themeBtn').onclick = () => {
+    const next = isDark() ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('finanze-tema', next); } catch (e) { /* resta valido fino alla chiusura */ }
+    themeLabel();
+    if (state.transactions.length) renderToday(view);           // il grafico usa i colori del tema
+  };
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeLabel);
+  themeLabel();
+
+  wireToday();
 
   // Calendario: cambio mese e giorno selezionato
   $('calendar').addEventListener('click', e => {
@@ -2299,7 +2668,7 @@
       ? `Scegli una password (almeno ${MIN_PW} caratteri) per proteggere i tuoi dati: verranno cifrati e serviranno a ogni accesso.
          <b>Se la dimentichi non potrai recuperarli</b>: non è salvata da nessuna parte.`
       : 'Inserisci la password per entrare.';
-    $('lockPw2').hidden = !setup;
+    $('lockPw2').hidden = $('lockPw2Label').hidden = !setup;
     $('lockPw').autocomplete = setup ? 'new-password' : 'current-password';
     $('lockBtn').textContent = setup ? 'Crea password ed entra' : 'Entra';
     $('forgotBtn').hidden = setup;
