@@ -39,7 +39,7 @@
   const bankTx = () => state.transactions.filter(t => !t.manual);
   // Per riconoscere i doppioni bastano i primi 200 caratteri della descrizione (margine per piccole differenze in coda)
   const txKey = t => t.date + '|' + t.amount + '|' + t.desc.slice(0, 200);
-  let removedDuplicates = 0, repairedThousands = 0, seededLoans = false;
+  let removedDuplicates = 0, repairedThousands = 0, crossDuplicates = 0, seededLoans = false;
   let state = empty();          // i dati veri arrivano solo dopo aver inserito la password (vedi initLock)
 
   // Prepara i dati letti dalla cassaforte, correggendo quelli salvati dalle versioni precedenti.
@@ -60,6 +60,7 @@
     }
     repairedThousands = repairThousands(s);
     removedDuplicates = cleanDuplicates(s);
+    crossDuplicates = cleanCrossFileDuplicates(s);
     return s;
   }
 
@@ -93,6 +94,52 @@
     }
     s.transactions = s.transactions.filter(t => !drop.has(t));
     for (const t of s.transactions) t.desc = t.desc.slice(0, DESC_MAX);
+    return drop.size;
+  }
+
+  // ---------- Stesso movimento da due file diversi ----------
+  // La banca descrive lo stesso movimento in modo diverso nel PDF e nell'Excel
+  // (es. "Bonifico a Vostro favore disposto da: …" e "Stipendio O Pensione - COD.DISP. …").
+  // Ogni estratto contiene tutti i movimenti dei giorni che copre: se un altro file copre già quel giorno
+  // e ha un movimento con stessa data e stesso importo, è lo stesso movimento, anche con un testo diverso.
+  const GENERIC_CATS = new Set(['altro', 'bonifici', 'bonifici_in', 'altre_entrate']);
+  const descCategory = t => (t.amount > 0 ? Categories.categorizeIncome : Categories.categorize)(Detector.normalize(t.desc));
+  // Delle due descrizioni tiene quella che dice di più (es. "Stipendio" invece di un bonifico generico)
+  function betterDesc(keep, other) {
+    const gk = GENERIC_CATS.has(descCategory(keep)), go = GENERIC_CATS.has(descCategory(other));
+    if (gk !== go) return gk ? other.desc : keep.desc;
+    return other.desc.length > keep.desc.length ? other.desc : keep.desc;
+  }
+  function fileCovers(s, src, date) {
+    const f = (s.files || []).find(x => x.id === src);
+    return !!f && f.from <= date && date <= f.to;
+  }
+  // Pulizia dei doppioni già salvati: per ogni giorno e importo resta il numero di movimenti
+  // del file che ne ha di più; le copie arrivate da altri file vengono tolte.
+  function cleanCrossFileDuplicates(s) {
+    const groups = {};
+    for (const t of s.transactions) {
+      if (t.manual || !t.src || !fileCovers(s, t.src, t.date)) continue;
+      (groups[t.date + '|' + t.amount] = groups[t.date + '|' + t.amount] || []).push(t);
+    }
+    const drop = new Set();
+    for (const g of Object.values(groups)) {
+      const bySrc = {};
+      for (const t of g) (bySrc[t.src] = bySrc[t.src] || []).push(t);
+      const srcs = Object.keys(bySrc);
+      if (srcs.length < 2) continue;
+      srcs.sort((a, b) => bySrc[b].length - bySrc[a].length);
+      const kept = bySrc[srcs[0]];
+      for (const src of srcs.slice(1)) {
+        bySrc[src].forEach((t, i) => {
+          const k = kept[i];
+          if (!k) return;
+          k.desc = betterDesc(k, t);
+          drop.add(t);
+        });
+      }
+    }
+    if (drop.size) s.transactions = s.transactions.filter(t => !drop.has(t));
     return drop.size;
   }
   // Salva lo stato cifrato con la password (js/vault.js). Nulla viene più salvato in chiaro.
@@ -2125,6 +2172,13 @@
         if (t.desc.length > twin.t.desc.length) twin.t.desc = t.desc;       // tiene la descrizione più completa
         continue;
       }
+      // Stesso giorno e importo in un altro estratto che copre quel giorno: è lo stesso movimento scritto diversamente
+      const other = group.find(s => !s.used && !s.t.manual && s.t.src && s.t.src !== t.src && fileCovers(state, s.t.src, t.date));
+      if (other) {
+        other.used = true;
+        other.t.desc = betterDesc(other.t, t);
+        continue;
+      }
       const old = (sameDesc[t.date + '|' + t.desc] || []).find(o => Math.sign(o.amount) === Math.sign(t.amount)
         && Math.abs(t.amount) >= 1000 && Math.abs(o.amount) < Math.abs(t.amount)
         && Math.abs(((Math.abs(t.amount) - Math.abs(o.amount)) / 1000) % 1) < 0.00001);
@@ -2717,10 +2771,13 @@
     $('lockPw').value = $('lockPw2').value = '';
     $('lock').hidden = true;
     document.body.classList.remove('locked');
-    if (removedDuplicates || repairedThousands || seededLoans) save();
+    if (removedDuplicates || repairedThousands || crossDuplicates || seededLoans) save();
     render();
     showPage();                                                     // riparte l'animazione d'ingresso con i dati veri
-    if (repairedThousands) {
+    if (crossDuplicates) {
+      showStatus(`Ho tolto ${crossDuplicates} moviment${crossDuplicates === 1 ? 'o doppio' : 'i doppi'}: erano lo stesso movimento caricato da due estratti diversi
+        (per esempio il PDF e l'Excel dello stesso mese), scritto dalla banca con parole diverse. Non serve ricaricare niente.`);
+    } else if (repairedThousands) {
       showStatus(`Ho corretto ${repairedThousands} importi sopra i 1.000 € letti male in precedenza (es. gli stipendi). Non serve ricaricare l'estratto conto.`);
     } else if (removedDuplicates) {
       showStatus(`Ho trovato e rimosso ${removedDuplicates} moviment${removedDuplicates === 1 ? 'o duplicato' : 'i duplicati'}
