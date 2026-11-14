@@ -213,21 +213,21 @@
     let actions;
     if (isSuggestion) {
       actions = `<button class="btn" data-act="accept">Aggiungi</button>
-                 <button class="icon" data-act="ignore" title="Non è un abbonamento">✕</button>`;
+                 <button class="icon" data-act="ignore" title="Non è un abbonamento"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>`;
     } else if (s.ended && !s.cancelled) {
-      actions = `<button class="icon" data-act="edit" title="Modifica">✎</button>
-                 <button class="icon" data-act="delete" title="Elimina dalla lista">🗑</button>`;
+      actions = `<button class="icon" data-act="edit" title="Modifica"><svg class="ico" aria-hidden="true"><use href="#i-edit"/></svg></button>
+                 <button class="icon" data-act="delete" title="Elimina dalla lista"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>`;
     } else if (s.cancelled) {
       actions = `<button class="btn ghost" data-act="reactivate">Riattiva</button>
-                 <button class="icon" data-act="delete" title="Elimina dalla lista">🗑</button>`;
+                 <button class="icon" data-act="delete" title="Elimina dalla lista"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>`;
     } else {
       const cancelBtn = `<a class="btn cancel" href="${esc(s.cancelUrl)}" target="_blank" rel="noopener noreferrer"
               title="${searchFallback ? 'Cerca la guida per disdire ' : 'Vai alla pagina di disdetta di '}${esc(s.name)}">Disdici</a>`;
       actions = `${s.stale ? `<button class="btn ghost" data-act="stillActive" title="L'abbonamento è ancora attivo">Ancora attivo</button>` : cancelBtn}
-                 <button class="icon" data-act="done" title="Segna come disdetto">✓</button>
-                 ${s.next ? `<button class="icon" data-act="ics" title="Promemoria nel calendario">📅</button>` : ''}
-                 <button class="icon" data-act="edit" title="Modifica">✎</button>
-                 <button class="icon" data-act="delete" title="Elimina: non è un abbonamento">🗑</button>`;
+                 <button class="icon" data-act="done" title="Segna come disdetto"><svg class="ico" aria-hidden="true"><use href="#i-check"/></svg></button>
+                 ${s.next ? `<button class="icon" data-act="ics" title="Promemoria nel calendario"><svg class="ico" aria-hidden="true"><use href="#i-calendar"/></svg></button>` : ''}
+                 <button class="icon" data-act="edit" title="Modifica"><svg class="ico" aria-hidden="true"><use href="#i-edit"/></svg></button>
+                 <button class="icon" data-act="delete" title="Elimina: non è un abbonamento"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>`;
     }
     const cls = ['item', (s.cancelled || s.ended) && 'cancelled', s.stale && 'stale'].filter(Boolean).join(' ');
     return `<div class="${cls}" data-id="${esc(s.id)}" title="${esc(isSuggestion ? s.reason : (s.sampleDesc || ''))}">
@@ -370,7 +370,7 @@
     const missing = months.filter(m => !counts[m]);
     el.hidden = false;
     el.innerHTML = `
-      <div class="cov-head">📚 Storico: <b>${months.length} mes${months.length === 1 ? 'e' : 'i'}</b>
+      <div class="cov-head">Storico: <b>${months.length} mes${months.length === 1 ? 'e' : 'i'}</b>
         dal ${fmtDate(view.period.from)} al ${fmtDate(view.period.to)} · ${state.transactions.length} movimenti</div>
       <div class="chips">${months.map(m => `<span class="chip${counts[m] ? '' : ' missing'}" title="${counts[m] || 0} movimenti">${esc(monthLabel(m))}</span>`).join('')}</div>
       ${missing.length ? `<p class="small warn-text">Mancano i movimenti di: ${missing.map(monthLabel).join(', ')}. Caricali per un'analisi completa.</p>` : ''}
@@ -489,7 +489,7 @@
     const fees = rows.filter(x => x.t.amount < 0 && /costo bonifico|commissione bonifico/i.test(x.t.desc))
       .reduce((s, x) => s - x.t.amount, 0);
     if (!inRows.length && !outRows.length) {
-      el.innerHTML = '<h2>🔁 Bonifici</h2><p class="muted">Nessun bonifico in questo periodo.</p>';
+      el.innerHTML = '<h2>Bonifici</h2><p class="muted">Nessun bonifico in questo periodo.</p>';
       return;
     }
     const group = list => {
@@ -513,7 +513,7 @@
           <span class="cat-amt">${eur.format(p.total)}</span>`, p.txs, p.search)).join('');
     };
     el.innerHTML = `
-      <h2>🔁 Bonifici</h2>
+      <h2>Bonifici</h2>
       <div class="focus-stats">
         <div><span class="label">Ricevuti</span><b class="pos">${eur.format(sum(inRows))}</b></div>
         <div><span class="label">Inviati</span><b class="neg">${eur.format(sum(outRows))}</b></div>
@@ -555,18 +555,18 @@
     const focusMonths = pm ? 1 : months.length;
     const brandOr = list => x => Categories.brandOf(list, Detector.normalize(x.t.desc)) || party(x.t);
     renderFocus($('focusStipendio'), inRows.filter(x => x.cat === 'stipendio'), focusMonths, {
-      title: '💼 Stipendio', cat: 'stipendio', groupOf: x => party(x.t), unit: 'accredito', units: 'accrediti', avgLabel: 'Media per accredito', heading: 'Da chi',
+      title: 'Stipendio', cat: 'stipendio', groupOf: x => party(x.t), unit: 'accredito', units: 'accrediti', avgLabel: 'Media per accredito', heading: 'Da chi',
       empty: 'Nessuno stipendio riconosciuto in questo periodo. Se un accredito è il tuo stipendio, spostalo in "Stipendio" dalla lista "Entrate per categoria".',
     });
     renderCompare($('compareCard'), all, months, pm);
     renderBonifici($('bonificiCard'), rows);
     renderBollette($('focusBollette'), outRows.filter(x => x.cat === 'bollette'), focusMonths);
     renderFocus($('focusSpesa'), outRows.filter(x => x.cat === 'spesa'), focusMonths, {
-      title: '🛒 Spesa', cat: 'spesa', groupOf: brandOr(Categories.SUPERMARKETS), unit: 'spesa', units: 'spese', avgLabel: 'Scontrino medio',
+      title: 'Spesa', cat: 'spesa', groupOf: brandOr(Categories.SUPERMARKETS), unit: 'spesa', units: 'spese', avgLabel: 'Scontrino medio',
       empty: 'Nessuna spesa al supermercato in questo periodo. Se un negozio manca, spostalo in "Spesa alimentare" dalla lista delle categorie.',
     });
     renderFocus($('focusDelivery'), outRows.filter(x => x.cat === 'delivery'), focusMonths, {
-      title: '🛵 Delivery', cat: 'delivery', groupOf: brandOr(Categories.DELIVERY), unit: 'ordine', units: 'ordini', avgLabel: 'Ordine medio',
+      title: 'Delivery', cat: 'delivery', groupOf: brandOr(Categories.DELIVERY), unit: 'ordine', units: 'ordini', avgLabel: 'Ordine medio',
       empty: 'Nessun ordine a domicilio (Glovo, Deliveroo, Just Eat, Uber Eats) in questo periodo.',
     });
 
@@ -718,7 +718,7 @@
       </form>`;
 
     if (f.balance === null) {
-      el.innerHTML = `<h2>💸 Quanto posso spendere oggi?</h2>
+      el.innerHTML = `<h2>Quanto posso spendere oggi?</h2>
         <p class="muted">Inserisci il saldo attuale del conto (lo vedi nell'app della banca): calcolo quanto puoi spendere ogni giorno fino al prossimo stipendio.</p>${settings}`;
       return;
     }
@@ -745,7 +745,7 @@
     const chargeDots = included.map(p => { const i = pts.findIndex(q => q.d === p.date); return i < 0 ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(pts[i].bal).toFixed(1)}" r="3.5"><title>${esc(p.name)} ${eur.format(p.amount)} il ${fmtDate(p.date)}</title></circle>`; }).join('');
     const neg = endBalance < 0;
 
-    el.innerHTML = `<h2>💸 Quanto posso spendere oggi?</h2>
+    el.innerHTML = `<h2>Quanto posso spendere oggi?</h2>
       <div class="fc-hero ${perDay < 0 ? 'bad' : perDay < rate ? 'warn' : 'good'}">
         <div><span class="fc-big">${eur.format(Math.max(0, perDay))}</span><span class="fc-unit">al giorno</span></div>
         <p>${perDay < 0
@@ -924,7 +924,7 @@
   // Confronta un mese (quello scelto nel filtro, altrimenti l'ultimo con dati) con la media degli altri mesi,
   // categoria per categoria. I mesi senza spese in una categoria contano come zero nella media.
   function renderCompare(el, all, months, pm) {
-    const title = '<h2>📊 Confronto con gli altri mesi</h2>';
+    const title = '<h2>Confronto con gli altri mesi</h2>';
     if (months.length < 2) {
       el.innerHTML = title + '<p class="muted">Servono almeno due mesi di movimenti: carica un altro estratto conto per attivare il confronto.</p>';
       return;
@@ -997,7 +997,7 @@
   function renderBollette(el, rows, monthsCount) {
     const info = Categories.byId.bollette;
     if (!rows.length) {
-      el.innerHTML = '<h2>💡 Bollette</h2><p class="muted">Nessuna bolletta in questo periodo. Se un fornitore manca, spostalo in "Bollette" dalla lista delle categorie.</p>';
+      el.innerHTML = '<h2>Bollette</h2><p class="muted">Nessuna bolletta in questo periodo. Se un fornitore manca, spostalo in "Bollette" dalla lista delle categorie.</p>';
       return;
     }
     const typed = rows.map(x => { const p = party(x.t); return Object.assign({ p, type: billType(x.t, p.key) }, x); });
@@ -1023,7 +1023,7 @@
       .map(([k, v]) => `<option value="${k}"${k === p.type ? ' selected' : ''}>${v}</option>`).join('')}</select>` : '<span></span>';
 
     el.innerHTML = `
-      <h2>💡 Bollette</h2>
+      <h2>Bollette</h2>
       <div class="chips bill-filter">
         <button class="chip${billFilter === 'all' ? ' on' : ''}" data-bill="all">Tutte</button>
         ${present.map(k => `<button class="chip${billFilter === k ? ' on' : ''}" data-bill="${k}">${BILL_TYPES[k]}</button>`).join('')}
@@ -1292,7 +1292,7 @@
       ${goalRows.map(({ g, left, n, quota, late }) => `<div class="sav-goal" data-goal="${esc(g.id)}">
         <div class="sav-goal-head"><b>${esc(g.name)}</b><span class="muted small">${eur.format(g.target)} entro ${monthLabel(g.deadline)}</span>
           <label class="inline">Già da parte € <input inputmode="decimal" class="num-in" data-goal-saved="${esc(g.id)}" value="${String(g.saved).replace('.', ',')}"></label>
-          <button class="icon" data-goal-del="${esc(g.id)}" title="Elimina obiettivo">🗑</button></div>
+          <button class="icon" data-goal-del="${esc(g.id)}" title="Elimina obiettivo"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button></div>
         ${bar(g.target ? g.saved / g.target * 100 : 0, 'var(--accent)')}
         <p class="small">${left === 0 ? '✅ Raggiunto!' : late ? `<span class="neg">Scadenza passata: mancano ${eur.format(left)}.</span>`
           : `Metti da parte <b>${eur.format(quota)} al mese</b> per ${n} mes${n === 1 ? 'e' : 'i'}.`}</p>
@@ -1358,7 +1358,7 @@
           <span class="tx-date">${fmtDate(t.date)}</span>
           <span>${esc(t.label)}</span>
           <b class="pos">+${eur.format(t.amount)}</b>
-          <button class="icon" data-del-cash="${esc(t.id)}" title="Elimina">🗑</button>
+          <button class="icon" data-del-cash="${esc(t.id)}" title="Elimina"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>
         </div>`).join('')}`).join('')}`;
   }
 
@@ -1401,7 +1401,7 @@
       ${rows.map(({ l, sch, paid, left, next }) => `<div class="sav-goal">
         <div class="sav-goal-head"><b>${esc(l.name)}</b>
           <span class="muted small">${eur.format(l.rate)} × ${l.n} rate${l.tan !== null ? ` · TAN ${String(l.tan).replace('.', ',')}%` : ''}${l.taeg !== null ? ` · TAEG ${String(l.taeg).replace('.', ',')}%` : ''}</span>
-          <button class="icon" data-loan-del="${esc(l.id)}" title="Elimina prestito">🗑</button></div>
+          <button class="icon" data-loan-del="${esc(l.id)}" title="Elimina prestito"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button></div>
         ${bar(paid / l.n * 100, 'var(--accent)')}
         <p class="small">Rata ${paid} di ${l.n} · ${next
           ? `prossima <b>${eur.format(next.amount)}</b> il <b>${fmtDate(next.date)}</b> · restano ${eur.format(left)}, ultima rata il ${fmtDate(sch[sch.length - 1].date)}`
@@ -1516,7 +1516,7 @@
           <span class="dot" style="background:${catColor(l.cat)}"></span><b>${esc(catName(l.cat))}</b>
           <label class="inline">Limite € <input class="num-in" inputmode="decimal" data-limit-amount="${esc(l.id)}" value="${String(l.amount).replace('.', ',')}"></label>
           <span class="muted small">${PERIOD_LABEL[l.period]}</span>
-          <button class="icon" data-limit-del="${esc(l.id)}" title="Elimina limite">🗑</button>
+          <button class="icon" data-limit-del="${esc(l.id)}" title="Elimina limite"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>
         </div>
         <div class="limit-body">
           <svg class="limit-ring" viewBox="0 0 128 128" aria-hidden="true">
@@ -1554,7 +1554,7 @@
           <span><span class="dot" style="background:${catColor(q.cat)}"></span> ${esc(catName(q.cat))}${q.note ? ` <small class="muted">· ${esc(q.note)}</small>` : ''}</span>
           <span class="badge ${t ? '' : 'warn'}">${t ? `✓ nell'estratto conto${Math.abs(-t.amount - q.amount) >= .01 ? ` (${eur.format(-t.amount)})` : ''}` : 'in attesa dell\'estratto conto'}</span>
           <b>${eur.format(q.amount)}</b>
-          <button class="icon" data-quick-del="${esc(q.id)}" title="Elimina">🗑</button>
+          <button class="icon" data-quick-del="${esc(q.id)}" title="Elimina"><svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg></button>
         </div>`;
       }).join('') : '<p class="muted">Nessuna spesa segnata. Quando ordini, segnala qui sopra.</p>'}
       <p class="small muted">Le spese "in attesa" contano nei limiti finché non arriva l'estratto conto; poi conta il movimento della banca al loro posto. Non compaiono nelle altre pagine, quindi non raddoppiano nulla.</p>`;
@@ -2370,6 +2370,26 @@
   }
 
   $('lockNowBtn').onclick = lockNow;
+
+  // Tema chiaro / scuro: segue il sistema finché non lo scegli tu dal pulsante in alto.
+  (function initTheme() {
+    const KEY = 'gestionale-theme', root = document.documentElement, btn = $('themeBtn');
+    try { const t = localStorage.getItem(KEY); if (t) root.dataset.theme = t; } catch (e) {}
+    const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    const paint = () => {
+      const dark = isDark(), label = dark ? 'Passa al tema chiaro' : 'Passa al tema scuro';
+      btn.title = label; btn.setAttribute('aria-label', label);
+      btn.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
+      for (const m of document.querySelectorAll('meta[name=theme-color]')) m.content = dark ? '#0B1719' : '#EDF2F2';
+    };
+    btn.onclick = () => {
+      root.dataset.theme = isDark() ? 'light' : 'dark';
+      try { localStorage.setItem(KEY, root.dataset.theme); } catch (e) {}
+      paint();
+    };
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+    paint();
+  })();
 
   // Cambio password: serve quella attuale, così nessuno può cambiarla approfittando dell'app lasciata aperta.
   $('pwBtn').onclick = () => {
