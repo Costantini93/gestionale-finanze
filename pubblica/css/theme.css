@@ -496,6 +496,14 @@ details.td-tbl summary, details.td-planned summary { cursor: pointer; font-size:
 .td-del { min-height: 44px; padding: 0 8px; font: 500 14px var(--body); background: none; border: 0; cursor: pointer; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .td-empty { font-size: 14px; color: var(--muted); margin: 0; }
 
+/* soldi liberati */
+.td-freed-big { margin: 0 0 16px; font-size: 16px; color: var(--muted); }
+.td-freed-big b { display: block; font: 600 40px/1.15 var(--display); color: var(--text); font-variant-numeric: tabular-nums; }
+.td-freed-act { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.td-freed-act > div { flex: 1 1 200px; }
+#tdFreed { max-width: 720px; }
+#deliveryVs .td-res { max-width: 560px; }
+
 /* prossimi addebiti nella home */
 .td-panel .upcoming .up-row { min-height: 52px; }
 

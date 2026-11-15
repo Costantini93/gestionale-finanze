@@ -30,6 +30,9 @@
     // pendingTx: spese "non contabilizzate" dell'ultima esportazione Excel; contano solo in "Oggi posso"
     // finché la banca non le contabilizza. pendingAsOf: data dell'esportazione da cui arrivano.
     pendingTx: [], pendingAsOf: null,
+    // budgetLog: budget di ogni giorno (data -> euro), per sapere quanto avanza a fine giornata
+    // freed: "Soldi liberati" (movedUntil = fino a quando sono già stati messi da parte, hidden = nascosto)
+    budgetLog: {}, freed: { movedUntil: null, hidden: false },
     // excludeDeposits: non contare i versamenti di contanti come entrate (sono già registrati a mano come contanti)
     settings: { remindDays: 2, excludeDeposits: false } });
   // Dal dettaglio prestito nell'app della banca (ottobre 2026): 9 rate mensili ciascuno
@@ -52,6 +55,7 @@
     s.forecast = Object.assign(empty().forecast, s.forecast);
     s.savings = Object.assign(empty().savings, s.savings);
     s.savings.emergency = Object.assign(empty().savings.emergency, s.savings.emergency);
+    s.freed = Object.assign(empty().freed, s.freed);
     // Prestiti registrati una volta sola al primo accesso (poi si possono modificare o eliminare dalla pagina Prestiti)
     if (!s.loansPreset) {
       for (const l of PRESET_LOANS) if (!s.loans.some(x => x.id === l.id || (x.rate === l.rate && x.first === l.first))) s.loans.push(Object.assign({}, l));
@@ -665,6 +669,7 @@
 
     planRows = everything;
     renderToday(view);
+    renderDeliveryVs();
     renderCalendar(view);
     renderSavings(view);
     renderSearch();
@@ -854,6 +859,25 @@
     m.pool = m.balance + spentToday - m.fixedTot - m.reserve;           // disponibile da inizio giornata
     m.allow = m.pool / daysLeft;
     m.remaining = m.allow - spentToday;
+
+    // Avanzato: per ogni giorno passato del periodo, budget di quel giorno meno quanto speso.
+    // Il budget di oggi resta aggiornato fino a mezzanotte, poi non cambia più.
+    const log = state.budgetLog || (state.budgetLog = {});
+    if (log[today] === undefined || Math.abs(log[today] - m.allow) >= 0.005) {
+      log[today] = Math.round(m.allow * 100) / 100;
+      const old = addDays(today, -120);
+      for (const d of Object.keys(log)) if (d < old) delete log[d];
+      saveSoon();
+    }
+    let saved = 0, counted = 0, streak = 0, streakOpen = true;
+    for (let i = T - 1; i >= 0; i--) {
+      const d = days[i];
+      if (log[d] === undefined || dayState(m, i) === 'unknown') { streakOpen = false; continue; }
+      saved += log[d] - byDay[i]; counted++;
+      if (streakOpen && byDay[i] <= log[d] + 0.004) streak++; else streakOpen = false;
+    }
+    m.saved = counted ? saved : null;
+    m.streak = streak;
     return m;
   }
 
@@ -867,6 +891,7 @@
     renderTodayList(m);
     renderTodayCheck();
     renderTodaySettings(m);
+    renderFreed();
   }
 
   // ---------- Banda con il numero di oggi ----------
@@ -929,8 +954,10 @@
         <div><dt>Budget di oggi</dt><dd>${money(m.allow)}</dd></div>
         <div><dt>Già speso oggi</dt><dd>${money(m.spentToday)}</dd></div>
         <div><dt>Giorni allo stipendio</dt><dd>${m.daysLeft} ${m.daysLeft === 1 ? 'giorno' : 'giorni'}</dd></div>
+        ${m.saved !== null ? `<div><dt>${m.saved < -0.004 ? 'Sforato nel periodo' : 'Avanzato nel periodo'}</dt><dd>${money(Math.abs(m.saved))}</dd></div>` : ''}
       </dl>
-      <p class="td-note">${note}</p>${stale}`;
+      <p class="td-note">${note}${m.saved === null ? ' Da domani conto anche quanto ti avanza ogni giorno.'
+        : m.streak >= 2 ? ` Sei entro il budget da ${m.streak} giorni di fila.` : ''}</p>${stale}`;
     if (firstPaint) heroShown = heroShown === null || reduceMotion() ? null : 0;
     paintHero(heroShown === null ? Math.abs(m.remaining) : heroShown);
     setHero(Math.abs(m.remaining));
@@ -1109,6 +1136,73 @@
     det.open = wasOpen;
   }
 
+  // ---------- Soldi liberati ----------
+  // Se prima c'erano uscite per giochi e scommesse e da almeno 7 giorni non ce ne sono più,
+  // mostra quanto resta in tasca rispetto alla media di prima. Si può nascondere.
+  function freedModel() {
+    if (state.freed.hidden) return null;
+    const bank = planRows.filter(x => !x.t.manual);
+    const bets = bank.filter(x => x.cat === 'scommesse' && x.t.amount < 0);
+    if (bets.length < 3) return null;
+    const dataStart = bank.reduce((m, x) => !m || x.t.date < m ? x.t.date : m, '');
+    const last = bets.reduce((m, x) => { const d = realWhen(x.t).date; return d > m ? d : m; }, '');
+    const today = todayIso(), since = Detector.daysBetween(last, today);
+    const before = Detector.daysBetween(dataStart, last) + 1;
+    if (since < 7 || before < 60) return null;
+    const total = bets.reduce((s, x) => s - x.t.amount, 0), perDay = total / before;
+    const from = state.freed.movedUntil && state.freed.movedUntil > last ? state.freed.movedUntil : last;
+    const days = Detector.daysBetween(from, today);
+    return { since, perMonth: perDay * 30.4, amount: Math.round(perDay * days), moved: from !== last };
+  }
+  function renderFreed() {
+    const el = $('tdFreed'), f = freedModel();
+    el.hidden = !f;
+    if (!f) return;
+    const goals = state.savings.goals.filter(g => g.saved < g.target);
+    const action = !f.amount ? '' : goals.length
+      ? `<form class="td-freed-act" id="tdFreedForm">
+          <div><label class="lbl" for="tdFreedGoal">Obiettivo</label>
+            <select class="inp" id="tdFreedGoal">${goals.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('')}</select></div>
+          <button class="btn" type="submit">Aggiungi ${money0(f.amount)} all'obiettivo</button>
+        </form>`
+      : `<p class="td-foot"><a class="link" href="#/risparmio">Crea un obiettivo nel Piano di risparmio</a> per dare una destinazione a questi soldi.</p>`;
+    el.innerHTML = `<div class="td-head"><h2 id="tdFreedH" class="td-ph">Soldi liberati</h2>
+        <button class="td-del" type="button" data-freed-hide>Nascondi</button></div>
+      <p class="td-sub">Da ${f.since} giorni non ci sono uscite per giochi e scommesse. Prima ne uscivano in media ${money0(f.perMonth)} al mese.</p>
+      <p class="td-freed-big"><b>${money0(f.amount)}</b> ${f.moved ? 'in più da quando li hai messi da parte l’ultima volta' : 'rimasti a te in questi giorni'}</p>
+      ${action}`;
+  }
+
+  // ---------- Domicilio o spesa? (pagina Delivery) ----------
+  function renderDeliveryVs() {
+    const el = $('deliveryVs');
+    const bank = planRows.filter(x => !x.t.manual && x.t.amount < 0);
+    const end = bank.reduce((m, x) => x.t.date > m ? x.t.date : m, '');
+    if (!end) { el.hidden = true; return; }
+    const start = addDays(end, -89);
+    const inWin = cat => bank.filter(x => x.cat === cat && x.t.date >= start);
+    const orders = inWin('delivery'), grocery = inWin('spesa');
+    if (orders.length < 2) { el.hidden = true; return; }
+    el.hidden = false;
+    const oTot = orders.reduce((s, x) => s - x.t.amount, 0), gTot = grocery.reduce((s, x) => s - x.t.amount, 0);
+    const avgOrder = oTot / orders.length, perMonth = oTot / 90 * 30.4, perWeekGrocery = gTot / 90 * 7;
+    const cap = Math.max(5, Math.round(perMonth * 0.75 / 5) * 5);
+    const lims = state.limits.filter(l => l.cat === 'delivery');
+    const same = lims.find(l => l.period === 'month' && Math.abs(l.amount - cap) < 0.5);
+    el.innerHTML = `<h2 id="deliveryVsH">Domicilio o spesa?</h2>
+      <p class="muted">Negli ultimi 3 mesi di estratto conto, fino al ${fmtShort(end)}.</p>
+      <dl class="td-res">
+        <div><dt>Ordini a domicilio</dt><dd>${orders.length}<small>circa ${(orders.length / 90 * 30.4).toLocaleString('it-IT', { maximumFractionDigits: 1 })} al mese</small></dd></div>
+        <div><dt>Ordine medio</dt><dd>${money(avgOrder)}</dd></div>
+        <div><dt>Al mese per il domicilio</dt><dd>${money(perMonth)}<small>${money(perMonth * 12)} all'anno</small></dd></div>
+        ${gTot ? `<div><dt>Spesa al supermercato a settimana</dt><dd>${money(perWeekGrocery)}<small>un ordine medio vale ${(avgOrder / perWeekGrocery * 7).toLocaleString('it-IT', { maximumFractionDigits: 1 })} giorni di spesa</small></dd></div>` : ''}
+        <div><dt>Ordinando la metà delle volte</dt><dd>${money(perMonth / 2)} in meno al mese<small>${money(perMonth * 6)} all'anno</small></dd></div>
+      </dl>
+      <p class="td-hint">Limite consigliato: <b>${money0(cap)} al mese</b>, un quarto in meno della tua media.
+        ${lims.length ? `Adesso hai ${lims.map(l => `${money0(l.amount)} ${PERIOD_LABEL[l.period]}`).join(' e ')}.` : ''}</p>
+      ${same ? '<p class="td-foot">Questo limite è già attivo.</p>' : `<button class="btn" type="button" data-dv-cap="${cap}">Imposta il limite di ${money0(cap)} al mese</button>`}`;
+  }
+
   // ---------- Avviso in basso con "Annulla" ----------
   let toastTimer = 0;
   function toast(msg, undo) {
@@ -1160,6 +1254,40 @@
       $('tdAmount').focus();
     });
     $('tdPrice').addEventListener('input', renderTodayCheck);
+
+    // Soldi liberati: aggiunti a un obiettivo del Piano di risparmio, oppure nascosti
+    $('tdFreed').addEventListener('submit', e => {
+      if (e.target.id !== 'tdFreedForm') return;
+      e.preventDefault();
+      const f = freedModel(), g = state.savings.goals.find(x => x.id === $('tdFreedGoal').value);
+      if (!f || !g || !f.amount) return;
+      const prev = { saved: g.saved, movedUntil: state.freed.movedUntil };
+      g.saved = Math.round((g.saved + f.amount) * 100) / 100;
+      state.freed.movedUntil = todayIso();
+      save(); renderToday(view); renderSavings(view);
+      toast(`Aggiunti ${money0(f.amount)} a "${g.name}".`, () => { g.saved = prev.saved; state.freed.movedUntil = prev.movedUntil; save(); renderToday(view); renderSavings(view); });
+    });
+    $('tdFreed').addEventListener('click', e => {
+      if (!e.target.closest('[data-freed-hide]')) return;
+      state.freed.hidden = true; save(); renderFreed();
+      toast('Soldi liberati nascosto.', () => { state.freed.hidden = false; save(); renderFreed(); });
+      $('tdAmount').focus();
+    });
+
+    // Domicilio o spesa: imposta il limite consigliato (sostituisce un limite mensile già esistente)
+    $('deliveryVs').addEventListener('click', e => {
+      const b = e.target.closest('[data-dv-cap]');
+      if (!b) return;
+      const cap = Number(b.dataset.dvCap), old = state.limits.find(l => l.cat === 'delivery' && l.period === 'month');
+      const before = old ? old.amount : null;
+      if (old) old.amount = cap; else state.limits.push({ id: 'lim' + Date.now().toString(36), cat: 'delivery', period: 'month', amount: cap });
+      save(); render();
+      toast(`Limite impostato: ${money0(cap)} al mese per il cibo a domicilio.`, () => {
+        if (before !== null) state.limits.find(l => l.cat === 'delivery' && l.period === 'month').amount = before;
+        else state.limits = state.limits.filter(l => !(l.cat === 'delivery' && l.period === 'month' && l.amount === cap));
+        save(); render();
+      });
+    });
 
     // Prima volta: saldo e giorno dello stipendio dentro la banda
     $('todayBand').addEventListener('submit', e => {
