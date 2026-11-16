@@ -207,7 +207,7 @@ b, strong, th { font-weight: 600; }
 .btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--border); }
 .btn.ghost:hover { background: var(--side-hover); }
-.btn.cancel { background: var(--danger); border-color: var(--danger); color: var(--card); }
+.btn.cancel { background: var(--danger); border-color: var(--danger); color: var(--card-solid); }
 .btn.cancel:hover { filter: none; background: color-mix(in srgb, var(--danger) 85%, var(--text)); }
 .small-btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
 .icon {
@@ -531,3 +531,152 @@ details.td-planned { margin-top: 16px; border-top: 1px solid var(--border); padd
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* =====================================================================
+   Vetro: macchie di colore ferme sullo sfondo e superfici semitrasparenti
+   sfocate. I testi restano sempre pieni. Con "Riduci trasparenza" attivo
+   (o un browser senza sfocatura) le superfici tornano piene.
+   Ridefinisce i colori delle superfici dei blocchi qui sopra.
+   ===================================================================== */
+:root {
+  --bg: #DCEDEE;
+  --blob-a: #3FC4CC; --blob-b: #FFB38A; --blob-c: #8FA6FF; --blob-d: #7EE0B5;
+  --card: rgba(255, 255, 255, .50);
+  --muted: #3D5558;
+  --card-solid: #F4FAFA;
+  --field: rgba(255, 255, 255, .45);
+  --glass-strong: rgba(250, 253, 253, .82);
+  --glass-edge: rgba(255, 255, 255, .90);
+  --border: rgba(16, 40, 43, .12);
+  --track: rgba(16, 40, 43, .14);
+  --gloss: rgba(255, 255, 255, .28);
+  --glass-shadow: 0 1px 0 var(--glass-edge) inset, 0 20px 40px -24px rgba(14, 42, 45, .35);
+  --band: rgba(7, 76, 84, .88);
+  --band-muted: #E0F3F4;
+  --top-bg: rgba(255, 255, 255, .45);
+  --side-bg: rgba(255, 255, 255, .40);
+  --side-hover: rgba(14, 107, 115, .10);
+  --warn-soft: rgba(251, 225, 180, .62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #071416;
+    --blob-a: #138A94; --blob-b: #8A4A2A; --blob-c: #3A4FB0; --blob-d: #1E7A5A;
+    --card: rgba(12, 28, 32, .64);
+    --muted: #B4CACC;
+    --card-solid: #10262A;
+    --field: rgba(10, 26, 29, .45);
+    --glass-strong: rgba(16, 36, 40, .88);
+    --glass-edge: rgba(255, 255, 255, .14);
+    --border: rgba(255, 255, 255, .11);
+    --track: rgba(255, 255, 255, .12);
+    --gloss: rgba(255, 255, 255, .07);
+    --glass-shadow: 0 1px 0 var(--glass-edge) inset, 0 24px 48px -24px rgba(0, 0, 0, .7);
+    --band: rgba(10, 70, 76, .62);
+    --top-bg: rgba(10, 26, 29, .50);
+    --side-bg: rgba(10, 26, 29, .45);
+    --side-hover: rgba(255, 255, 255, .07);
+    --warn-soft: rgba(90, 64, 20, .50);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #071416;
+  --blob-a: #138A94; --blob-b: #8A4A2A; --blob-c: #3A4FB0; --blob-d: #1E7A5A;
+  --card: rgba(12, 28, 32, .64);
+  --muted: #B4CACC;
+  --card-solid: #10262A;
+  --field: rgba(10, 26, 29, .45);
+  --glass-strong: rgba(16, 36, 40, .88);
+  --glass-edge: rgba(255, 255, 255, .14);
+  --border: rgba(255, 255, 255, .11);
+  --track: rgba(255, 255, 255, .12);
+  --gloss: rgba(255, 255, 255, .07);
+  --glass-shadow: 0 1px 0 var(--glass-edge) inset, 0 24px 48px -24px rgba(0, 0, 0, .7);
+  --band: rgba(10, 70, 76, .62);
+  --top-bg: rgba(10, 26, 29, .50);
+  --side-bg: rgba(10, 26, 29, .45);
+  --side-hover: rgba(255, 255, 255, .07);
+  --warn-soft: rgba(90, 64, 20, .50);
+}
+
+/* Sfondo: quattro macchie ferme, niente animazione.
+   Il colore di fondo sta su <html>: se lo avesse anche <body> coprirebbe le macchie. */
+html { background: var(--bg); }
+body { background: transparent; }
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(38vmax 32vmax at 6% 4%, var(--blob-a), transparent 66%),
+    radial-gradient(30vmax 26vmax at 98% 14%, var(--blob-b), transparent 64%),
+    radial-gradient(34vmax 30vmax at 82% 62%, var(--blob-c), transparent 64%),
+    radial-gradient(36vmax 30vmax at 10% 78%, var(--blob-d), transparent 64%);
+}
+.app { background: transparent; }
+
+/* Superfici di vetro */
+.card, .content .card, .kpis, .td-panel, .lock-box, dialog, .status,
+#tdDaysSec, #tdFreed, .td-cols > section {
+  background-color: var(--card);
+  background-image: linear-gradient(180deg, var(--gloss), rgba(255, 255, 255, 0) 46%);
+  border: 1px solid var(--border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8);
+}
+.alert-card { background-color: var(--warn-soft); }
+.status.error { background-color: var(--danger-soft); }
+.topbar, .sidebar {
+  -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6);
+}
+.topbar { background: var(--top-bg); }
+.sidebar { background: var(--side-bg); }
+dialog { background-color: var(--glass-strong); }
+dialog::backdrop { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+
+/* Home: ogni blocco diventa una lastra; niente più linee di separazione */
+.td-sec { border-top: 0; padding-top: 0; margin-top: 24px; }
+#tdDaysSec, #tdFreed, .td-cols > section { border-radius: 24px; padding: 20px; }
+.td-cols > .td-panel { border-radius: 24px; }
+#tdFreed { max-width: none; }
+.td-chart .halo { stroke: var(--glass-strong); }
+
+/* Banda del numero di oggi: vetro colorato, con un'ombra leggera sul testo */
+.td-band {
+  background-color: var(--band);
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, 0) 38%);
+  border: 1px solid rgba(255, 255, 255, .38);
+  border-radius: 28px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .45) inset, 0 30px 60px -30px rgba(6, 50, 55, .6);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8);
+  text-shadow: 0 1px 2px rgba(0, 40, 44, .25);
+}
+.td-setup .inp, .td-setup .btn { text-shadow: none; }
+
+/* Campi e categorie di vetro; il bordo chiaro fa da contorno */
+input, select, .inp, .td-chip span { border-color: var(--glass-edge); }
+.td-chip input:checked + span { border-color: transparent; }
+
+/* Più spazio agli angoli */
+.card, .content .card, .kpis { border-radius: 20px; }
+
+/* Il menu a scomparsa su telefono resta leggibile sopra il contenuto */
+@media (max-width: 900px) {
+  .sidebar { background: var(--glass-strong); }
+}
+
+/* Meno trasparenza, o niente sfocatura: superfici piene */
+@media (prefers-reduced-transparency: reduce) {
+  .card, .content .card, .kpis, .td-panel, .lock-box, dialog, .status, #tdDaysSec, #tdFreed, .td-cols > section,
+  .topbar, .sidebar, .td-band, dialog::backdrop {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  .card, .content .card, .kpis, .td-panel, .lock-box, .status, #tdDaysSec, #tdFreed, .td-cols > section,
+  .topbar, .sidebar { background-color: var(--glass-strong) !important; background-image: none !important; }
+  .td-band { background-color: #0B5F67 !important; background-image: none !important; text-shadow: none; }
+  body::before { opacity: .35; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card, .content .card, .kpis, .td-panel, .lock-box, .status, #tdDaysSec, #tdFreed, .td-cols > section,
+  .topbar, .sidebar { background-color: var(--glass-strong); }
+  .td-band { background-color: #0B5F67; }
+}
+.lock { background: transparent; }
