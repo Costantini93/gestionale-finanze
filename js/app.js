@@ -633,7 +633,7 @@
     });
     renderCompare($('compareCard'), all, months, pm);
     renderBonifici($('bonificiCard'), rows);
-    renderBollette($('focusBollette'), outRows.filter(x => x.cat === 'bollette'), focusMonths);
+    renderBollette($('focusBollette'), outRows.filter(x => x.cat === 'bollette'), focusMonths, all.filter(x => x.t.amount < 0 && x.cat === 'bollette'));
     renderFocus($('focusSpesa'), outRows.filter(x => x.cat === 'spesa'), focusMonths, {
       title: '🛒 Spesa', cat: 'spesa', groupOf: brandOr(Categories.SUPERMARKETS), unit: 'spesa', units: 'spese', avgLabel: 'Scontrino medio',
       empty: 'Nessuna spesa al supermercato in questo periodo. Se un negozio manca, spostalo in "Spesa alimentare" dalla lista delle categorie.',
@@ -1592,59 +1592,134 @@
     return 'luce_gas';
   }
 
-  function renderBollette(el, rows, monthsCount) {
+  // Ogni quanto arriva una bolletta, dalla distanza media fra un addebito e il successivo dello stesso fornitore
+  function billEvery(days) {
+    if (!days) return '–';
+    if (days < 45) return 'ogni mese';
+    if (days < 75) return 'ogni 2 mesi';
+    if (days < 110) return 'ogni 3 mesi';
+    if (days < 150) return 'ogni 4 mesi';
+    if (days < 220) return 'ogni 6 mesi';
+    return 'una volta all’anno';
+  }
+  let billPeriod = 'quarter';                       // raggruppamento della tabella "Nei vari periodi"
+  const BILL_PERIODS = { month: 'Mese', quarter: 'Trimestre', year: 'Anno' };
+  const billPeriodKey = (iso, p) => p === 'year' ? iso.slice(0, 4) : p === 'month' ? iso.slice(0, 7) : `${iso.slice(0, 4)}-T${Math.floor((+iso.slice(5, 7) - 1) / 3) + 1}`;
+  const billPeriodName = (k, p) => p === 'year' ? k : p === 'month' ? monthLabel(k) : `${['gen–mar', 'apr–giu', 'lug–set', 'ott–dic'][+k.slice(-1) - 1]} ${k.slice(0, 4)}`;
+  function billNextPeriod(k, p) {
+    if (p === 'year') return String(+k + 1);
+    if (p === 'month') { const [y, m] = k.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; }
+    const y = +k.slice(0, 4), q = +k.slice(-1);
+    return q === 4 ? `${y + 1}-T1` : `${y}-T${q + 1}`;
+  }
+
+  // rows: bollette del periodo scelto in alto; allRows: tutte le bollette dello storico (per medie e periodi)
+  function renderBollette(el, rows, monthsCount, allRows) {
     const info = Categories.byId.bollette;
-    if (!rows.length) {
-      el.innerHTML = '<h2>💡 Bollette</h2><p class="muted">Nessuna bolletta in questo periodo. Se un fornitore manca, spostalo in "Bollette" dalla lista delle categorie.</p>';
+    if (!allRows.length) {
+      el.innerHTML = '<h2>Bollette</h2><p class="muted">Nessuna bolletta trovata. Carica l’estratto conto; se un fornitore manca, spostalo in "Bollette" dalla pagina Uscite.</p>';
       return;
     }
-    const typed = rows.map(x => { const p = party(x.t); return Object.assign({ p, type: billType(x.t, p.key) }, x); });
-    const present = Object.keys(BILL_TYPES).filter(k => typed.some(x => x.type === k));
+    // Lo stesso fornitore può essere scritto in modi diversi ("S.c.a" / "S.c. A R.l."): si raggruppa per la prima parola del nome
+    const provGroup = p => (Detector.normalize(p.name).trim().split(/\s+/).find(w => w.length > 2) || p.name).toLowerCase();
+    const typeOf = x => { const p = party(x.t); return Object.assign({ p, g: provGroup(p), type: billType(x.t, p.key) }, x); };
+    const typed = rows.map(typeOf), typedAll = allRows.map(typeOf);
+    const present = Object.keys(BILL_TYPES).filter(k => typedAll.some(x => x.type === k));
     if (billFilter !== 'all' && !present.includes(billFilter)) billFilter = 'all';
-    const sel = billFilter === 'all' ? typed : typed.filter(x => x.type === billFilter);
+    const keep = x => billFilter === 'all' || x.type === billFilter;
+    const sel = typed.filter(keep), selAll = typedAll.filter(keep);
     const total = sel.reduce((s, x) => s - x.t.amount, 0);
 
+    // Mesi coperti dall'estratto conto (per le medie al mese anche nei mesi senza bollette)
+    const bank = bankTx();
+    const dStart = bank.reduce((m, t) => !m || t.date < m ? t.date : m, ''), dEnd = bank.reduce((m, t) => t.date > m ? t.date : m, '');
+    const coveredMonths = dStart ? Math.max(1, (Detector.daysBetween(dStart, dEnd) + 1) / 30.44) : 1;
+
+    // Media per tipo, su tutto lo storico
+    const byType = present.map(k => {
+      const list = typedAll.filter(x => x.type === k), sum = list.reduce((s, x) => s - x.t.amount, 0);
+      const gaps = [];
+      const byProv = {};
+      for (const x of list) (byProv[x.g] = byProv[x.g] || []).push(x.t.date);
+      for (const ds of Object.values(byProv)) { ds.sort(); for (let i = 1; i < ds.length; i++) gaps.push(Detector.daysBetween(ds[i - 1], ds[i])); }
+      const gap = gaps.length ? gaps.reduce((s, g) => s + g, 0) / gaps.length : 0;
+      return { k, n: list.length, sum, avg: sum / list.length, perMonth: sum / coveredMonths, every: billEvery(gap) };
+    });
+
+    // Nei vari periodi: tabella periodi × tipi, con la media per periodo in fondo
+    const cols = billFilter === 'all' ? present : [billFilter];
+    const cells = {};
+    for (const x of selAll) { const pk = billPeriodKey(x.t.date, billPeriod); (cells[pk] = cells[pk] || {})[x.type] = ((cells[pk] || {})[x.type] || 0) - x.t.amount; }
+    const first = billPeriodKey(dStart || selAll[0].t.date, billPeriod), last = billPeriodKey(dEnd || selAll[selAll.length - 1].t.date, billPeriod);
+    const periods = [];
+    for (let k = first; k <= last && periods.length < 120; k = billNextPeriod(k, billPeriod)) periods.push(k);
+    const colTot = Object.fromEntries(cols.map(c => [c, periods.reduce((s, k) => s + ((cells[k] || {})[c] || 0), 0)]));
+    const money = v => v ? eur.format(v) : '–';
+    const table = `<div class="td-tablewrap bill-table"><table>
+        <caption class="sr-only">Bollette per ${BILL_PERIODS[billPeriod].toLowerCase()} e per tipo</caption>
+        <thead><tr><th scope="col">${BILL_PERIODS[billPeriod]}</th>${cols.map(c => `<th scope="col">${BILL_TYPES[c]}</th>`).join('')}${cols.length > 1 ? '<th scope="col">Totale</th>' : ''}</tr></thead>
+        <tbody>${[...periods].reverse().map(k => {
+          const row = cells[k] || {}, tot = cols.reduce((s, c) => s + (row[c] || 0), 0);
+          return `<tr><th scope="row">${esc(billPeriodName(k, billPeriod))}</th>${cols.map(c => `<td>${money(row[c])}</td>`).join('')}${cols.length > 1 ? `<td><b>${money(tot)}</b></td>` : ''}</tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr><th scope="row">Media per ${BILL_PERIODS[billPeriod].toLowerCase()}</th>${cols.map(c => `<td>${eur.format(colTot[c] / periods.length)}</td>`).join('')}${cols.length > 1 ? `<td><b>${eur.format(cols.reduce((s, c) => s + colTot[c], 0) / periods.length)}</b></td>` : ''}</tr></tfoot>
+      </table></div>`;
+
+    // Fornitori (con il tipo da scegliere) e bollette pagate, nel periodo scelto in alto
     const providers = {};
     for (const x of typed) {
-      const e = providers[x.p.key || x.p.name] || (providers[x.p.key || x.p.name] = Object.assign({ total: 0, n: 0, type: x.type, txs: [] }, x.p));
-      if (billFilter === 'all' || x.type === billFilter) { e.total -= x.t.amount; e.n++; e.txs.push(x.t); }
+      const e = providers[x.g] || (providers[x.g] = Object.assign({ total: 0, n: 0, type: x.type, txs: [], keys: new Set() }, x.p));
+      if (x.p.key) e.keys.add(x.p.key);
+      if (x.p.name.length < e.name.length) e.name = x.p.name;                 // il nome più corto è di solito il più pulito
+      if (keep(x)) { e.total -= x.t.amount; e.n++; e.txs.push(x.t); }
     }
     const list = Object.values(providers).filter(p => p.n).sort((a, b) => b.total - a.total);
-    const byMonth = {};
-    for (const { t } of sel) {
-      const m = byMonth[t.date.slice(0, 7)] || (byMonth[t.date.slice(0, 7)] = { total: 0, n: 0, txs: [] });
-      m.total -= t.amount; m.n++; m.txs.push(t);
-    }
-    const ms = Object.keys(byMonth).sort();
-    const mmax = Math.max(1, ...ms.map(k => byMonth[k].total));
-    const typeSelect = p => p.key ? `<select data-bill-key="${esc(p.key)}" title="Che tipo di bolletta è?">${Object.entries(BILL_TYPES)
-      .map(([k, v]) => `<option value="${k}"${k === p.type ? ' selected' : ''}>${v}</option>`).join('')}</select>` : '<span></span>';
+    const typeSelect = p => p.keys.size ? `<label class="bill-type"><span class="sr-only">Tipo di bolletta di ${esc(p.name)}</span><select data-bill-key="${esc([...p.keys].join('\n'))}">${Object.entries(BILL_TYPES)
+      .map(([k, v]) => `<option value="${k}"${k === p.type ? ' selected' : ''}>${v}</option>`).join('')}</select></label>` : '<span></span>';
+    const paid = [...sel].sort((a, b) => b.t.date.localeCompare(a.t.date));
 
     el.innerHTML = `
-      <h2>💡 Bollette</h2>
-      <div class="chips bill-filter">
-        <button class="chip${billFilter === 'all' ? ' on' : ''}" data-bill="all">Tutte</button>
-        ${present.map(k => `<button class="chip${billFilter === k ? ' on' : ''}" data-bill="${k}">${BILL_TYPES[k]}</button>`).join('')}
+      <h2>Bollette</h2>
+      <div class="chips bill-filter" role="group" aria-label="Tipo di bolletta">
+        <button class="chip${billFilter === 'all' ? ' on' : ''}" data-bill="all" aria-pressed="${billFilter === 'all'}">Tutte</button>
+        ${present.map(k => `<button class="chip${billFilter === k ? ' on' : ''}" data-bill="${k}" aria-pressed="${billFilter === k}">${BILL_TYPES[k]}</button>`).join('')}
       </div>
       <div class="focus-stats">
-        <div><span class="label">Totale</span><b style="color:${info.color}">${eur.format(total)}</b></div>
+        <div><span class="label">Totale nel periodo</span><b style="color:${info.color}">${eur.format(total)}</b></div>
         <div><span class="label">Bollette</span><b>${sel.length}</b></div>
         <div><span class="label">Bolletta media</span><b>${eur.format(sel.length ? total / sel.length : 0)}</b></div>
         <div><span class="label">Media al mese</span><b>${eur.format(total / Math.max(1, monthsCount))}</b></div>
       </div>
+
+      <h3 class="focus-h">Media per tipo</h3>
+      <p class="small muted">Su tutto lo storico caricato (${Math.round(coveredMonths)} mesi). La media al mese conta anche i mesi senza bolletta.</p>
+      <div class="td-tablewrap bill-table"><table>
+        <thead><tr><th scope="col">Tipo</th><th scope="col">Arriva</th><th scope="col">Bollette</th><th scope="col">Bolletta media</th><th scope="col">Al mese</th><th scope="col">All’anno</th></tr></thead>
+        <tbody>${byType.map(r => `<tr><th scope="row">${BILL_TYPES[r.k]}</th><td>${r.every}</td><td>${r.n}</td><td>${eur.format(r.avg)}</td><td>${eur.format(r.perMonth)}</td><td><b>${eur.format(r.perMonth * 12)}</b></td></tr>`).join('')}</tbody>
+      </table></div>
+
+      <div class="bill-head">
+        <h3 class="focus-h">Nei vari periodi</h3>
+        <div class="seg" role="group" aria-label="Raggruppa per">
+          ${Object.entries(BILL_PERIODS).map(([k, v]) => `<button type="button" data-bill-period="${k}" aria-pressed="${billPeriod === k}">${v}</button>`).join('')}
+        </div>
+      </div>
+      ${table}
+      <p class="small muted">Le bollette arrivano spesso ogni 2 o 3 mesi: per confrontare i periodi è più utile il trimestre o l’anno.</p>
+
       <h3 class="focus-h">Fornitori</h3>
+      <p class="small muted">Se il tipo è sbagliato (es. Magis o AGSM possono essere luce, gas o tutti e due), sceglilo dal menu: vale per tutte le bollette di quel fornitore.</p>
       ${list.map(p => drow('focus-row bill-row', `
           <span class="d-name">${esc(p.name)}</span>
-          <span class="focus-n">${p.n} bollett${p.n === 1 ? 'a' : 'e'} · media ${eur.format(p.total / p.n)}</span>
+          <span class="focus-n">${p.n} bollett${p.n === 1 ? 'a' : 'e'}, media ${eur.format(p.total / p.n)}</span>
           <span class="cat-amt">${eur.format(p.total)}</span>
           ${typeSelect(p)}`, p.txs, p.search)).join('')}
-      ${ms.length > 1 ? `<h3 class="focus-h">Mese per mese</h3>
-        ${ms.map(k => drow('focus-row', `
-          <span class="d-name">${monthLabel(k)}</span>
-          <span class="cat-bar"><span style="width:${(byMonth[k].total / mmax * 100).toFixed(1)}%;background:${info.color}"></span></span>
-          <span class="focus-n">${byMonth[k].n} bollett${byMonth[k].n === 1 ? 'a' : 'e'}</span>
-          <span class="cat-amt">${eur.format(byMonth[k].total)}</span>`, byMonth[k].txs)).join('')}` : ''}
-      <p class="small muted">Le bollette arrivano spesso ogni due mesi: la media al mese è calcolata su tutti i mesi del periodo, anche quelli senza addebito.</p>`;
+
+      <h3 class="focus-h">Bollette pagate</h3>
+      <ul class="bill-paid">${paid.map(x => `<li>
+        <span class="tx-date">${fmtDate(x.t.date)}</span>
+        <span class="bill-who">${esc((providers[x.g] || x.p).name)}<small>${BILL_TYPES[x.type]}</small></span>
+        <b>${eur.format(-x.t.amount)}</b></li>`).join('') || '<li class="muted">Nessuna bolletta nel periodo scelto in alto.</li>'}</ul>`;
   }
 
   // ---------- Sezioni dedicate (Stipendio, Spesa, Delivery) ----------
@@ -2710,12 +2785,17 @@
   $('focusBollette').addEventListener('click', e => {
     if (searchFromClick(e)) return;
     const chip = e.target.closest('[data-bill]');
-    if (chip) { billFilter = chip.dataset.bill; renderSpese(view); }
+    if (chip) { billFilter = chip.dataset.bill; renderSpese(view); return; }
+    const per = e.target.closest('[data-bill-period]');
+    if (per) {
+      billPeriod = per.dataset.billPeriod; renderSpese(view);
+      const again = $('focusBollette').querySelector(`[data-bill-period="${billPeriod}"]`); if (again) again.focus();
+    }
   });
   $('focusBollette').addEventListener('change', e => {
     const sel = e.target.closest('select[data-bill-key]');
     if (!sel) return;
-    state.billTypes[sel.dataset.billKey] = sel.value;
+    for (const k of sel.dataset.billKey.split('\n')) state.billTypes[k] = sel.value;
     save();
     renderSpese(view);
   });

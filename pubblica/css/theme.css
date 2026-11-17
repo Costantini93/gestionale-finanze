@@ -957,3 +957,23 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .lock .lock-box, .lock .lock-box.leaving, .lamp-cord.swing { animation: none; }
 }
+
+/* ---------- Pagina Bollette ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bill-table { margin: 8px 0 4px; }
+.bill-table table { min-width: 520px; }
+.bill-table tbody th, .bill-table tfoot th { font-weight: 500; color: var(--text); text-align: left; }
+.bill-table tfoot td, .bill-table tfoot th { border-bottom: 0; border-top: 2px solid var(--border); font-weight: 600; }
+.bill-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.bill-head .focus-h { margin: 0; }
+.seg { display: inline-flex; padding: 4px; gap: 4px; border-radius: 12px; background: var(--field); border: 1px solid var(--border); }
+.seg button { min-height: 40px; min-width: 44px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: 500 14px var(--body); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.bill-paid { list-style: none; margin: 4px 0 0; padding: 0; }
+.bill-paid li { display: grid; grid-template-columns: 96px 1fr auto; gap: 12px; align-items: center; min-height: 52px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.bill-paid li:last-child { border-bottom: 0; }
+.bill-who small { display: block; font-size: 13px; color: var(--muted); }
+.bill-paid b { font-family: var(--display); font-weight: 600; font-variant-numeric: tabular-nums; }
+.bill-type select { min-height: 44px; }
+.page[data-page="bollette"] .focus-h { text-transform: none; letter-spacing: 0; font: 600 18px/1.25 var(--display); color: var(--text); margin-top: 24px; }
