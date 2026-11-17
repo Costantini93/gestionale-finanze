@@ -1,6 +1,6 @@
 // Service worker: salva l'app sul dispositivo così funziona anche senza connessione.
 // Quando modifichi i file dell'app, aumenta VERSION per far scaricare la nuova versione.
-const VERSION = 'v44';
+const VERSION = 'v45';
 const CACHE = 'abbonamenti-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css', 'css/theme.css',

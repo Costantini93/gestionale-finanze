@@ -947,10 +947,11 @@ body::before {
 
 /* Telefono e schermi stretti: lampada sopra, modulo sotto */
 @media (max-width: 760px) {
-  .lock { place-items: start center; }
+  /* La lampada ha sempre la stessa dimensione: spenta sta al centro, accesa sale e sotto compare il modulo */
+  .lock { place-items: center; }
+  .lock:has(.lamp-scene.on) { place-items: start center; }
   .lamp-scene { flex-direction: column; gap: 56px; padding-top: 8px; }
-  .lamp { height: min(52vh, 420px); }
-  .lamp-scene.on .lamp { height: min(38vh, 300px); transition: height .4s ease; }
+  .lamp { height: min(44vh, 360px); }
   .lamp-slot { width: 100%; display: flex; justify-content: center; }
   .lamp-slot:has(.lock-box[hidden]) { display: none; }
 }
