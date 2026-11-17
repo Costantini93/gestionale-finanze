@@ -1,6 +1,6 @@
 // Service worker: salva l'app sul dispositivo così funziona anche senza connessione.
 // Quando modifichi i file dell'app, aumenta VERSION per far scaricare la nuova versione.
-const VERSION = 'v43';
+const VERSION = 'v44';
 const CACHE = 'abbonamenti-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css', 'css/theme.css',
@@ -22,10 +22,13 @@ self.addEventListener('activate', e => {
 });
 
 // Prima la rete (così gli aggiornamenti arrivano subito), poi la copia salvata se si è offline.
+// Per i file del sito si chiede sempre al server se sono cambiati (cache: 'no-cache'): senza, il browser
+// può riusare per alcuni minuti copie vecchie di alcuni file e mescolare versioni diverse dell'app.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const sameOrigin = new URL(e.request.url).origin === self.location.origin;
   e.respondWith(
-    fetch(e.request)
+    (sameOrigin ? fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(e.request))
       .then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));
