@@ -1,0 +1,39 @@
+# Controlli automatici: girano a ogni pull request e a ogni modifica del ramo principale.
+# 1) sintassi dei file JavaScript, 2) lettura dei file e categorie (Node), 3) app vera nel browser (Playwright).
+name: Controlli
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  controlli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sintassi dei file JavaScript
+        run: for f in js/*.js sw.js; do node --check "$f"; done
+
+      - name: Lettura dei file e categorie
+        run: node --test tests/unit/*.test.cjs
+
+      - name: Installa il browser per la prova dell'app
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Prova dell'app nel browser
+        run: |
+          python3 -m http.server 8765 >/dev/null 2>&1 &
+          sleep 1
+          node tests/e2e/app.mjs

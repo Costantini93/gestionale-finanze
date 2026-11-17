@@ -97,6 +97,7 @@
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/></symbol>
       <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
       <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="3" x2="9" y2="21"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
       <symbol id="i-menu" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
     </defs>
   </svg>
@@ -149,9 +150,18 @@
       <div class="nav-group">Dati</div>
       <a href="#/carica" data-page="carica"><svg class="ico"><use href="#i-upload"/></svg><span class="nav-label">Carica estratto conto</span></a>
       <a href="#/impostazioni" data-page="impostazioni"><svg class="ico"><use href="#i-settings"/></svg><span class="nav-label">Impostazioni</span></a>
-      <p class="nav-version">Versione 41</p>
+      <p class="nav-version">Versione 42</p>
     </nav>
     <div class="nav-shade" id="navShade"></div>
+
+    <!-- Telefono: barra in basso con le sezioni principali e il pulsante per aggiungere una spesa -->
+    <nav class="tabbar" id="tabbar" aria-label="Sezioni principali">
+      <a href="#/dashboard" data-tab="dashboard"><svg class="ico"><use href="#i-home"/></svg><span>Oggi</span></a>
+      <a href="#/uscite" data-tab="uscite"><svg class="ico"><use href="#i-out"/></svg><span>Uscite</span></a>
+      <button type="button" class="tab-add" id="tabAdd" aria-label="Aggiungi una spesa"><svg class="ico"><use href="#i-plus"/></svg></button>
+      <a href="#/abbonamenti" data-tab="abbonamenti"><svg class="ico"><use href="#i-repeat"/></svg><span>Abbonamenti</span></a>
+      <button type="button" id="tabMenu" aria-controls="sidebar" aria-expanded="false"><svg class="ico"><use href="#i-menu"/></svg><span>Menu</span></button>
+    </nav>
 
     <!-- Contenuto -->
     <main class="content">
@@ -176,6 +186,14 @@
         </section>
 
         <section class="td-band" id="todayBand" aria-labelledby="tdLabel"></section>
+
+        <section class="recap-banner" id="recapBanner" hidden aria-labelledby="recapBannerH">
+          <div><h2 id="recapBannerH">Il riepilogo del periodo scorso è pronto</h2><p id="recapBannerSub"></p></div>
+          <div class="recap-banner-act">
+            <button class="btn" type="button" id="recapOpen">Guarda il riepilogo</button>
+            <button class="link" type="button" id="recapLater">Più tardi</button>
+          </div>
+        </section>
 
         <section class="card alert-card" id="alertsCard" hidden>
           <h2>Da controllare</h2>
@@ -204,6 +222,19 @@
               <tbody id="tdTbody"></tbody>
             </table></div>
           </details>
+          <button class="link recap-link" type="button" id="recapLink" hidden>Guarda il riepilogo del periodo scorso</button>
+        </section>
+
+        <section class="td-sec" id="tdForecast" aria-labelledby="tdFcH" hidden>
+          <h2 id="tdFcH">Fino allo stipendio</h2>
+          <p class="td-sub">Come cambia il saldo del conto giorno per giorno, con le spese di tutti i giorni e gli addebiti previsti.</p>
+          <p class="fc-sum" id="tdFcSum" aria-live="polite"></p>
+          <div class="fc-chart" id="tdFcChart"></div>
+          <div class="fc-rate">
+            <label class="lbl" for="tdFcRate">Spesa di tutti i giorni: <output id="tdFcRateOut" for="tdFcRate"></output> al giorno</label>
+            <input type="range" id="tdFcRate" min="0" max="100" step="1">
+            <p class="td-foot" id="tdFcHint"></p>
+          </div>
         </section>
 
         <div class="td-sec td-cols">
@@ -524,6 +555,19 @@
   </div>
 
   <div class="nav-tip" id="navTip" hidden aria-hidden="true"></div>
+  <dialog class="recap" id="recapDlg" aria-labelledby="recapTitle">
+    <div class="recap-top">
+      <div class="recap-steps" id="recapSteps" aria-hidden="true"></div>
+      <button class="recap-close" type="button" id="recapClose" aria-label="Chiudi il riepilogo"><svg class="ico"><use href="#i-plus"/></svg></button>
+    </div>
+    <div class="recap-card" id="recapCard" aria-live="polite"></div>
+    <div class="recap-nav">
+      <button class="btn ghost" type="button" id="recapPrev">Indietro</button>
+      <span class="recap-count" id="recapCount"></span>
+      <button class="btn" type="button" id="recapNext">Avanti</button>
+    </div>
+  </dialog>
+
   <div class="toastwrap" id="toastWrap" hidden><div class="toast" id="toast" role="status"></div></div>
 
   <dialog id="pwDlg">

@@ -328,7 +328,27 @@
     return tx.length ? tx : parsePdfLines(lines, false);
   }
 
-  const api = { parseAmount, parseDate, parseCSV, rowsToTransactions, pdfLinesToTransactions };
+  // Alcuni Excel (es. la "Lista movimenti" di Intesa dal sito) dichiarano un'area del foglio più piccola
+  // di quella reale (A1:J33 con 1.000 righe): la libreria leggerebbe solo le prime righe.
+  // Qui l'area viene ricalcolata dalle celle davvero presenti. utils = XLSX.utils (SheetJS).
+  function fixSheetRange(ws, utils) {
+    let maxR = 0, maxC = 0, any = false;
+    for (const k of Object.keys(ws)) {
+      if (k[0] === '!') continue;
+      const c = utils.decode_cell(k);
+      if (c.r > maxR) maxR = c.r;
+      if (c.c > maxC) maxC = c.c;
+      any = true;
+    }
+    if (!any) return ws;
+    const cur = ws['!ref'] ? utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+    if (maxR > cur.e.r || maxC > cur.e.c) {
+      ws['!ref'] = utils.encode_range({ s: cur.s, e: { r: Math.max(maxR, cur.e.r), c: Math.max(maxC, cur.e.c) } });
+    }
+    return ws;
+  }
+
+  const api = { parseAmount, parseDate, parseCSV, rowsToTransactions, pdfLinesToTransactions, fixSheetRange };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Parser = api;
 })(this);
