@@ -285,7 +285,7 @@
                  <button class="icon" data-act="delete" title="Elimina: non è un abbonamento">🗑</button>`;
     }
     const cls = ['item', (s.cancelled || s.ended) && 'cancelled', s.stale && 'stale'].filter(Boolean).join(' ');
-    return `<div class="${cls}" data-id="${esc(s.id)}" title="${esc(isSuggestion ? s.reason : (s.sampleDesc || ''))}">
+    return `<div class="${cls}" data-id="${esc(s.id)}" style="--lc:${logoColor(s.name)}" title="${esc(isSuggestion ? s.reason : (s.sampleDesc || ''))}">
       <div class="logo" style="background:${logoColor(s.name)}">${esc(s.name.charAt(0).toUpperCase())}</div>
       <div class="info">
         <div class="name">${esc(s.name)}${badges}</div>
@@ -2507,6 +2507,36 @@
   $('menuBtn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
   $('navShade').onclick = () => setNav(false);
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { setNav(false); $('menuBtn').focus(); } });
+
+  // Menu sul computer: barra di sole icone (il nome compare passandoci sopra) oppure con i nomi.
+  // La scelta resta salvata su questo dispositivo. Sul telefono il menu resta il cassetto con i nomi.
+  const navWide = on => {
+    document.body.classList.toggle('nav-wide', on);
+    $('navToggle').setAttribute('aria-pressed', String(on));
+    $('navToggle').querySelector('.nav-label').textContent = on ? 'Nascondi i nomi' : 'Mostra i nomi';
+    try { localStorage.setItem('finanze-menu', on ? 'nomi' : 'icone'); } catch (e) { /* vale fino alla chiusura */ }
+  };
+  try { navWide(localStorage.getItem('finanze-menu') === 'nomi'); } catch (e) { navWide(false); }
+  $('navToggle').onclick = () => { navWide(!document.body.classList.contains('nav-wide')); hideNavTip(); };
+  const railMode = () => !document.body.classList.contains('nav-wide') && matchMedia('(min-width: 901px)').matches;
+  function showNavTip(el) {
+    const label = el.querySelector('.nav-label');
+    if (!railMode() || !label) return;
+    const tip = $('navTip'), r = el.getBoundingClientRect();
+    tip.textContent = label.textContent;
+    tip.hidden = false;
+    tip.style.left = (r.right + 12) + 'px';
+    tip.style.top = (r.top + r.height / 2 - tip.offsetHeight / 2) + 'px';
+  }
+  function hideNavTip() { $('navTip').hidden = true; }
+  const side = $('sidebar');
+  side.addEventListener('mouseover', e => { const el = e.target.closest('a, .nav-toggle'); if (el) showNavTip(el); });
+  side.addEventListener('mouseleave', hideNavTip);
+  side.addEventListener('focusin', e => { const el = e.target.closest('a, .nav-toggle'); if (el && el.matches(':focus-visible')) showNavTip(el); });
+  side.addEventListener('focusout', hideNavTip);
+  side.addEventListener('scroll', hideNavTip, { passive: true });
+  window.addEventListener('resize', hideNavTip);
+  window.addEventListener('hashchange', hideNavTip);
 
   // Tema chiaro / scuro: la scelta resta salvata su questo dispositivo (non è un dato personale)
   const isDark = () => {
