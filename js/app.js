@@ -33,6 +33,8 @@
     // budgetLog: budget di ogni giorno (data -> euro), per sapere quanto avanza a fine giornata
     // freed: "Soldi liberati" (movedUntil = fino a quando sono già stati messi da parte, hidden = nascosto)
     budgetLog: {}, freed: { movedUntil: null, hidden: false },
+    // recapSeen: inizio del periodo di cui il riepilogo è già stato visto o rimandato
+    recapSeen: null,
     // excludeDeposits: non contare i versamenti di contanti come entrate (sono già registrati a mano come contanti)
     settings: { remindDays: 2, excludeDeposits: false } });
   // Dal dettaglio prestito nell'app della banca (ottobre 2026): 9 rate mensili ciascuno
@@ -882,8 +884,18 @@
     return m;
   }
 
+  // La stanza reagisce alla giornata: verde acqua entro il budget, ambra vicino al limite (80% speso), più scura se superato.
+  // Il colore da solo non basta: la banda lo dice anche a parole.
+  function todayMood(m) {
+    if (m.allow === null) return '';
+    if (m.remaining < -0.004) return 'over';
+    if (m.allow <= 0 || m.spentToday >= m.allow * 0.8) return 'near';
+    return 'ok';
+  }
   function renderToday(view) {
     const m = tdModel = todayModel(view);
+    m.mood = todayMood(m);
+    if (m.mood) document.documentElement.dataset.mood = m.mood; else delete document.documentElement.dataset.mood;
     renderTodayBand(m);
     drawTodayChart(m);
     renderTodayTable(m);
@@ -893,6 +905,160 @@
     renderTodayCheck();
     renderTodaySettings(m);
     renderFreed();
+    renderFcPeriod(m);
+    renderRecapBanner(m);
+  }
+
+  // ---------- Riepilogo del periodo scorso (schede da scorrere) ----------
+  // Periodo scorso = dallo stipendio precedente al giorno prima di quello attuale.
+  function recapData(m) {
+    const [y, mo] = m.start.split('-').map(Number);
+    const start = paydayIn(y, mo - 1, m.sal.day), end = addDays(m.start, -1);
+    const rows = planRows.filter(x => x.t.date >= start && x.t.date <= end && !(Categories.byId[x.cat] || {}).excluded);
+    const bankDays = new Set(rows.filter(x => !x.t.manual && !x.t.pending).map(x => x.t.date));
+    if (bankDays.size < 10) return null;                                  // estratto conto troppo scarso per quel periodo
+    const out = rows.filter(x => x.t.amount < 0), inc = rows.filter(x => x.t.amount > 0);
+    const spent = out.reduce((s, x) => s - x.t.amount, 0), income = inc.reduce((s, x) => s + x.t.amount, 0);
+    const byCat = {};
+    for (const x of out) byCat[x.cat] = (byCat[x.cat] || 0) - x.t.amount;
+    const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const byDay = {};
+    for (const x of out.filter(isVariable)) { const d = realWhen(x.t).date; (byDay[d] = byDay[d] || { sum: 0, rows: [] }).sum -= x.t.amount; byDay[d].rows.push(x); }
+    const top = Object.entries(byDay).sort((a, b) => b[1].sum - a[1].sum)[0];
+    const topWho = top ? top[1].rows.sort((a, b) => a.t.amount - b.t.amount)[0] : null;
+    let saved = null;
+    const log = state.budgetLog || {};
+    const logged = Object.keys(log).filter(d => d >= start && d <= end);
+    if (logged.length >= 5) saved = logged.reduce((s, d) => s + log[d] - (byDay[d] ? byDay[d].sum : 0), 0);
+    const subs = (view ? view.subs : []).filter(x => x.active);
+    const topSub = subs.sort((a, b) => Detector.monthlyCost(b) - Detector.monthlyCost(a))[0];
+    return { start, end, spent, income, cats, top, topWho, saved, topSub, freed: freedModel(), n: out.length };
+  }
+  function recapCards(r, m) {
+    const cards = [];
+    cards.push(`<p class="rc-kicker">Il tuo periodo</p><h2 id="recapTitle" class="rc-title">Dal ${fmtShort(r.start)} al ${fmtShort(r.end)}</h2><p class="rc-text">Ecco com'è andata, in poche schede.</p>`);
+    cards.push(`<p class="rc-kicker">Uscite ed entrate</p><p class="rc-big">${money0(r.spent)}</p><p class="rc-text">spesi in ${r.n} movimenti.</p>
+      <p class="rc-text">Sono entrati <b>${money0(r.income)}</b>: ${r.income >= r.spent ? `ti sono rimasti <b>${money0(r.income - r.spent)}</b>.` : `hai speso <b>${money0(r.spent - r.income)}</b> più di quanto è entrato.`}</p>`);
+    if (r.cats.length) {
+      const max = r.cats[0][1];
+      cards.push(`<p class="rc-kicker">Dove sono andati</p><h2 class="rc-title">Le tre voci più grandi</h2>
+        <ol class="rc-cats">${r.cats.map(([id, v]) => `<li><div class="rc-cat-h"><span>${esc(catLabel(id))}</span><b>${money0(v)}</b></div><div class="td-track"><span style="width:${(v / max * 100).toFixed(1)}%"></span></div></li>`).join('')}</ol>`);
+    }
+    if (r.top) cards.push(`<p class="rc-kicker">Il giorno più caro</p><h2 class="rc-title">${esc(dLong(r.top[0]))}</h2><p class="rc-big">${money0(r.top[1].sum)}</p>
+      <p class="rc-text">${r.top[1].rows.length} ${r.top[1].rows.length === 1 ? 'spesa' : 'spese'}${r.topWho ? `, la più grande da <b>${esc(party(r.topWho.t).name)}</b> (${money0(-r.topWho.t.amount)})` : ''}.</p>`);
+    if (r.saved !== null) cards.push(`<p class="rc-kicker">Il budget di ogni giorno</p><p class="rc-big">${money0(Math.abs(r.saved))}</p>
+      <p class="rc-text">${r.saved >= 0 ? 'avanzati rispetto al budget di ogni giorno. Bel lavoro.' : 'oltre il budget di ogni giorno, sommando le giornate.'}</p>`);
+    if (r.freed) cards.push(`<p class="rc-kicker">Soldi liberati</p><p class="rc-big">${money0(r.freed.amount)}</p>
+      <p class="rc-text">rimasti a te: da ${r.freed.since} giorni niente uscite per giochi e scommesse.</p>`);
+    if (r.topSub) cards.push(`<p class="rc-kicker">L'abbonamento più caro</p><h2 class="rc-title">${esc(r.topSub.name)}</h2>
+      <p class="rc-big">${money0(Detector.monthlyCost(r.topSub) * 12)}</p><p class="rc-text">all'anno, cioè ${money(Detector.monthlyCost(r.topSub))} al mese. Lo usi ancora?</p>`);
+    cards.push(`<p class="rc-kicker">Si riparte</p><h2 class="rc-title">Nuovo periodo fino al ${fmtShort(addDays(m.next, -1))}</h2>
+      ${m.allow !== null ? `<p class="rc-big">${money0(m.allow)}</p><p class="rc-text">è il tuo budget di oggi.</p>` : '<p class="rc-text">Scrivi il saldo in "Oggi posso" per avere il budget di ogni giorno.</p>'}`);
+    return cards;
+  }
+  let recap = null;
+  function renderRecapBanner(m) {
+    const r = recapData(m), b = $('recapBanner');
+    recap = r ? { r, cards: recapCards(r, m), i: 0, start: r.start } : null;
+    const fresh = r && Detector.daysBetween(m.start, m.today) <= 7 && state.recapSeen !== r.start;
+    b.hidden = !fresh;
+    if (fresh) $('recapBannerSub').textContent = `Dal ${fmtShort(r.start)} al ${fmtShort(r.end)}: dove sono andati i soldi, il giorno più caro e quanto è avanzato.`;
+    $('recapLink').hidden = !r;
+  }
+  function showRecapCard() {
+    const { cards, i } = recap;
+    $('recapCard').innerHTML = cards[i];
+    $('recapSteps').innerHTML = cards.map((_, k) => `<span class="${k <= i ? 'on' : ''}"></span>`).join('');
+    $('recapCount').textContent = `${i + 1} di ${cards.length}`;
+    $('recapPrev').disabled = i === 0;
+    $('recapNext').textContent = i === cards.length - 1 ? 'Chiudi' : 'Avanti';
+    const c = $('recapCard');
+    c.classList.remove('rc-in'); void c.offsetWidth; c.classList.add('rc-in');
+  }
+  function openRecap() {
+    if (!recap) return;
+    recap.i = 0;
+    state.recapSeen = recap.start; save();
+    $('recapBanner').hidden = true;
+    $('recapDlg').showModal();
+    showRecapCard();
+    $('recapNext').focus();
+  }
+  function wireRecap() {
+    const step = d => {
+      if (!recap) return;
+      const n = recap.i + d;
+      if (n >= recap.cards.length) return $('recapDlg').close();
+      if (n < 0) return;
+      recap.i = n; showRecapCard();
+    };
+    $('recapOpen').onclick = openRecap;
+    $('recapLink').onclick = openRecap;
+    $('recapLater').onclick = () => { if (recap) { state.recapSeen = recap.start; save(); } $('recapBanner').hidden = true; };
+    $('recapNext').onclick = () => step(1);
+    $('recapPrev').onclick = () => step(-1);
+    $('recapClose').onclick = () => $('recapDlg').close();
+    $('recapDlg').addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+    });
+    // Scorrimento col dito: a sinistra avanti, a destra indietro
+    let sx = null;
+    const card = $('recapCard');
+    card.addEventListener('pointerdown', e => { sx = e.clientX; });
+    card.addEventListener('pointerup', e => { if (sx === null) return; const dx = e.clientX - sx; sx = null; if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1); });
+  }
+
+  // ---------- Previsione fino allo stipendio ----------
+  // Saldo di fine giornata da oggi al giorno prima dello stipendio: si tolgono la spesa di tutti i giorni
+  // (media degli ultimi 3 mesi, modificabile col cursore) e gli addebiti previsti nel loro giorno.
+  let fcRate = null;                                    // scelta col cursore; null = media
+  function renderFcPeriod(m) {
+    const sec = $('tdForecast');
+    sec.hidden = m.allow === null;
+    if (sec.hidden) return;
+    const avg = Math.max(0, Math.round(dailyRate()));
+    const rate = fcRate === null ? avg : fcRate;
+    const slider = $('tdFcRate');
+    slider.max = String(Math.max(50, Math.ceil(Math.max(avg, m.allow > 0 ? m.allow : 0) * 2 / 10) * 10));
+    if (document.activeElement !== slider) slider.value = String(rate);
+    $('tdFcRateOut').textContent = money0(rate);
+    $('tdFcHint').textContent = `La tua media degli ultimi 3 mesi è ${money0(avg)} al giorno; il budget di oggi è ${money(m.allow)}. Sposta il cursore per vedere cosa cambia.`;
+
+    const charges = m.planned.filter(p => !state.forecast.excluded[p.key]);
+    const pts = [];
+    let bal = m.balance;
+    for (let i = 0; i < m.daysLeft; i++) {
+      const d = addDays(m.today, i);
+      if (i > 0) bal -= rate;                           // oggi le spese fatte sono già nel saldo
+      bal -= charges.filter(p => p.date === d).reduce((s, p) => s + p.amount, 0);
+      pts.push({ d, bal });
+    }
+    const end = pts[pts.length - 1].bal, below = pts.find(p => p.bal < 0);
+    $('tdFcSum').innerHTML = below
+      ? `<b class="fc-neg">Il conto va sotto zero il ${esc(dLong(below.d))}.</b> Al ritmo di ${money0(rate)} al giorno arrivi allo stipendio del ${fmtShort(m.next)} con <b class="fc-neg">${money(end)}</b>.`
+      : `Al ritmo di ${money0(rate)} al giorno arrivi allo stipendio del ${fmtShort(m.next)} con <b>${money(end)}</b>${m.reserve ? `, compresi i ${money(m.reserve)} da mettere da parte` : ''}.`;
+
+    // Grafico: linea del saldo, linea dello zero, punti sugli addebiti previsti
+    const box = $('tdFcChart'), W = Math.max(300, Math.floor(box.clientWidth || 600)), H = 170, mg = { t: 16, r: 12, b: 26, l: 12 };
+    const vals = pts.map(p => p.bal).concat([0, m.balance]);
+    const maxV = Math.max(...vals), minV = Math.min(...vals), span = Math.max(1, maxV - minV);
+    const x = i => mg.l + i * (W - mg.l - mg.r) / Math.max(1, pts.length - 1);
+    const y = v => mg.t + (maxV - v) * (H - mg.t - mg.b) / span;
+    const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.bal).toFixed(1)}`).join(' ');
+    const neg = !!below;
+    const dots = charges.map(p => {
+      const i = pts.findIndex(q => q.d === p.date);
+      return i < 0 ? '' : `<circle cx="${x(i).toFixed(1)}" cy="${y(pts[i].bal).toFixed(1)}" r="4" style="fill:var(--bg);stroke:var(--text)" stroke-width="2"><title>${esc(p.name)} ${money(p.amount)} il ${esc(dLong(p.date))}</title></circle>`;
+    }).join('');
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Saldo previsto da oggi allo stipendio: da ${money(m.balance)} a ${money(end)}">
+      <polygon points="${x(0).toFixed(1)},${y(Math.max(0, minV)).toFixed(1)} ${line} ${x(pts.length - 1).toFixed(1)},${y(Math.max(0, minV)).toFixed(1)}" style="fill:${neg ? 'var(--warn-mark)' : 'var(--accent)'}" opacity=".14"/>
+      <line x1="${mg.l}" x2="${W - mg.r}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" style="stroke:var(--muted)" stroke-width="1" stroke-dasharray="4 4"/>
+      <polyline points="${line}" fill="none" style="stroke:${neg ? 'var(--warn-mark)' : 'var(--accent)'}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text class="ax" x="${mg.l}" y="${H - 6}">oggi ${money0(m.balance)}</text>
+      <text class="ax" x="${W - mg.r}" y="${H - 6}" text-anchor="end">${fmtShort(addDays(m.next, -1))}: ${money0(end)}</text>
+    </svg>`;
   }
 
   // ---------- Banda con il numero di oggi ----------
@@ -957,6 +1123,7 @@
         <div><dt>Giorni allo stipendio</dt><dd>${m.daysLeft} ${m.daysLeft === 1 ? 'giorno' : 'giorni'}</dd></div>
         ${m.saved !== null ? `<div><dt>${m.saved < -0.004 ? 'Sforato nel periodo' : 'Avanzato nel periodo'}</dt><dd>${money(Math.abs(m.saved))}</dd></div>` : ''}
       </dl>
+      ${m.mood === 'near' && !neg ? `<p class="td-warn"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span>Sei vicino al limite di oggi: restano ${money(m.remaining)}.</span></p>` : ''}
       <p class="td-note">${note}${m.saved === null ? ' Da domani conto anche quanto ti avanza ogni giorno.'
         : m.streak >= 2 ? ` Sei entro il budget da ${m.streak} giorni di fila.` : ''}</p>${stale}`;
     if (firstPaint) heroShown = heroShown === null || reduceMotion() ? null : 0;
@@ -1223,6 +1390,7 @@
   const saveSoon = () => { clearTimeout(tdSaveTimer); tdSaveTimer = setTimeout(save, 600); };
 
   function wireToday() {
+    wireRecap();
     // Aggiungi una spesa: vale per oggi; finisce fra le "spese segnate" della pagina I miei limiti
     const amount = $('tdAmount'), amountErr = $('tdAmountErr');
     amount.addEventListener('input', () => { if (!amountErr.hidden) setFieldErr(amount, amountErr, ''); });
@@ -1255,6 +1423,7 @@
       $('tdAmount').focus();
     });
     $('tdPrice').addEventListener('input', renderTodayCheck);
+    $('tdFcRate').addEventListener('input', e => { fcRate = Number(e.target.value); if (tdModel) renderFcPeriod(tdModel); });
 
     // Soldi liberati: aggiunti a un obiettivo del Piano di risparmio, oppure nascosti
     $('tdFreed').addEventListener('submit', e => {
@@ -2351,25 +2520,6 @@
     return tx;
   }
 
-  // Alcuni Excel (es. la "Lista movimenti" di Intesa dal sito) dichiarano un'area del foglio più piccola
-  // di quella reale (A1:J33 con 1.000 righe): la libreria leggerebbe solo le prime righe.
-  // Qui l'area viene ricalcolata dalle celle davvero presenti.
-  function fixSheetRange(ws) {
-    let maxR = 0, maxC = 0, any = false;
-    for (const k of Object.keys(ws)) {
-      if (k[0] === '!') continue;
-      const c = XLSX.utils.decode_cell(k);
-      if (c.r > maxR) maxR = c.r;
-      if (c.c > maxC) maxC = c.c;
-      any = true;
-    }
-    if (!any) return;
-    const cur = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-    if (maxR > cur.e.r || maxC > cur.e.c) {
-      ws['!ref'] = XLSX.utils.encode_range({ s: cur.s, e: { r: Math.max(maxR, cur.e.r), c: Math.max(maxC, cur.e.c) } });
-    }
-  }
-
   async function parseFile(file) {
     const ext = file.name.split('.').pop().toLowerCase();
     if (ext === 'csv' || ext === 'txt') {
@@ -2382,7 +2532,7 @@
       const wb = XLSX.read(await readAs(file, 'buffer'), { type: 'array' });
       let best = [];
       for (const name of wb.SheetNames) {
-        fixSheetRange(wb.Sheets[name]);
+        Parser.fixSheetRange(wb.Sheets[name], XLSX.utils);
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
         const tx = Parser.rowsToTransactions(rows);
         if (tx.length + tx.pending > best.length + (best.pending || 0)) best = tx;
@@ -2546,6 +2696,10 @@
     document.title = page.dataset.title + ' · Gestionale finanze';
     document.body.classList.remove('nav-open');
     $('menuBtn').setAttribute('aria-expanded', 'false');
+    $('tabMenu').setAttribute('aria-expanded', 'false');
+    document.querySelectorAll('.tabbar [data-tab]').forEach(a => {
+      if (a.dataset.tab === page.dataset.page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
     window.scrollTo(0, 0);
     countUp(page);
   }
@@ -2579,10 +2733,25 @@
   showPage();
 
   // Menu a scomparsa su schermi piccoli
-  const setNav = open => { document.body.classList.toggle('nav-open', open); $('menuBtn').setAttribute('aria-expanded', String(open)); };
+  const setNav = open => {
+    document.body.classList.toggle('nav-open', open);
+    $('menuBtn').setAttribute('aria-expanded', String(open));
+    $('tabMenu').setAttribute('aria-expanded', String(open));
+  };
+  // Barra in basso (telefono): "Menu" apre il cassetto, "+" porta al modulo per aggiungere una spesa
+  $('tabMenu').onclick = () => setNav(!document.body.classList.contains('nav-open'));
+  $('tabAdd').onclick = () => {
+    setNav(false);
+    if (location.hash !== '#/dashboard') location.hash = '#/dashboard';
+    setTimeout(() => {
+      const f = $('tdAddForm');
+      f.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      $('tdAmount').focus({ preventScroll: true });
+    }, 60);
+  };
   $('menuBtn').onclick = () => setNav(!document.body.classList.contains('nav-open'));
   $('navShade').onclick = () => setNav(false);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { setNav(false); $('menuBtn').focus(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { setNav(false); ($('tabMenu').offsetParent ? $('tabMenu') : $('menuBtn')).focus(); } });
 
   // Menu sul computer: barra di sole icone (il nome compare passandoci sopra) oppure con i nomi.
   // La scelta resta salvata su questo dispositivo. Sul telefono il menu resta il cassetto con i nomi.
