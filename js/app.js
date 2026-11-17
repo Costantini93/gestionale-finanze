@@ -2538,28 +2538,6 @@
   window.addEventListener('resize', hideNavTip);
   window.addEventListener('hashchange', hideNavTip);
 
-  // Tema chiaro / scuro: la scelta resta salvata su questo dispositivo (non è un dato personale)
-  const isDark = () => {
-    const t = document.documentElement.getAttribute('data-theme');
-    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  };
-  function themeLabel() {
-    const dark = isDark(), l = dark ? 'Passa al tema chiaro' : 'Passa al tema scuro';
-    $('themeBtn').setAttribute('aria-label', l);
-    $('themeBtn').title = l;
-    $('themeBtn').querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
-    document.querySelector('meta[name="theme-color"]').content = dark ? '#112326' : '#0E6B73';
-  }
-  $('themeBtn').onclick = () => {
-    const next = isDark() ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('finanze-tema', next); } catch (e) { /* resta valido fino alla chiusura */ }
-    themeLabel();
-    if (state.transactions.length) renderToday(view);           // il grafico usa i colori del tema
-  };
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeLabel);
-  themeLabel();
-
   wireToday();
 
   // Calendario: cambio mese e giorno selezionato

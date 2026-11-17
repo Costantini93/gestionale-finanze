@@ -799,3 +799,60 @@ input, select, .inp, .td-chip span { border-color: var(--glass-edge); }
     grid-template-areas: "logo . price" "info info info" "actions actions actions";
   }
 }
+
+/* =====================================================================
+   Sempre scuro, vetro molto trasparente: dietro, grandi forme di colore
+   scure e sfocate (niente foto), accento verde acqua.
+   Il testo è chiaro su vetro scuro, così resta leggibile anche con molta
+   trasparenza. js/theme-init.js imposta sempre data-theme="dark".
+   ===================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #050C0E;
+  --card: rgba(18, 34, 38, .26);
+  --card-solid: #0E2024;
+  --field: rgba(6, 16, 18, .35);
+  --glass-strong: rgba(10, 24, 27, .90);
+  --glass-edge: rgba(255, 255, 255, .16);
+  --border: rgba(255, 255, 255, .12);
+  --track: rgba(255, 255, 255, .14);
+  --gloss: rgba(255, 255, 255, .09);
+  --glass-shadow: 0 1px 0 rgba(255, 255, 255, .14) inset, 0 24px 48px -24px rgba(0, 0, 0, .75);
+  --text: #EEF7F7;
+  --muted: #BFD3D5;
+  --band: rgba(14, 104, 112, .36);
+  --band-muted: #D2ECEE;
+  --top-bg: rgba(6, 16, 18, .40);
+  --side-bg: rgba(6, 16, 18, .40);
+  --rail: rgba(6, 16, 18, .45);
+  --warn-soft: rgba(120, 82, 20, .40);
+  --danger-soft: rgba(120, 30, 38, .40);
+}
+html { background: var(--bg); }
+/* Forme grandi e sfocate: colori scuri ma saturi, così il vetro sopra si vede */
+body::before {
+  inset: -10vmax;
+  background:
+    radial-gradient(34vmax 30vmax at 12% 10%, #0F7F89, transparent 70%),
+    radial-gradient(30vmax 26vmax at 88% 8%, #8A4B1F, transparent 70%),
+    radial-gradient(38vmax 30vmax at 78% 55%, #2A3E9C, transparent 70%),
+    radial-gradient(30vmax 28vmax at 18% 70%, #157052, transparent 70%),
+    radial-gradient(26vmax 22vmax at 52% 96%, #5E2C74, transparent 70%);
+  filter: blur(30px) saturate(1.1);
+  opacity: .9;
+}
+/* Più trasparenza: sfocatura un po' più leggera, così dietro si riconoscono le forme */
+.card, .content .card, .kpis, .td-panel, .lock-box, .status,
+#tdDaysSec, #tdFreed, .td-cols > section,
+.page[data-page="abbonamenti"] .item, .page[data-page="verifica"] .item {
+  -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
+}
+.td-band { -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6); border-color: rgba(255, 255, 255, .22); }
+.topbar, .sidebar { -webkit-backdrop-filter: blur(20px) saturate(1.5); backdrop-filter: blur(20px) saturate(1.5); }
+/* Le schede degli abbonamenti hanno la fascia di colore più leggera sul fondo scuro */
+.page[data-page="abbonamenti"] .item, .page[data-page="verifica"] .item {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--lc, var(--accent)) 30%, transparent) 0, color-mix(in srgb, var(--lc, var(--accent)) 10%, transparent) 56px, transparent 120px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .page[data-page="abbonamenti"] .item, .page[data-page="verifica"] .item { background-color: var(--glass-strong) !important; }
+}
