@@ -285,7 +285,7 @@
                  <button class="icon" data-act="delete" title="Elimina: non è un abbonamento">🗑</button>`;
     }
     const cls = ['item', (s.cancelled || s.ended) && 'cancelled', s.stale && 'stale'].filter(Boolean).join(' ');
-    return `<div class="${cls}" data-id="${esc(s.id)}" title="${esc(isSuggestion ? s.reason : (s.sampleDesc || ''))}">
+    return `<div class="${cls}" data-id="${esc(s.id)}" style="--lc:${logoColor(s.name)}" title="${esc(isSuggestion ? s.reason : (s.sampleDesc || ''))}">
       <div class="logo" style="background:${logoColor(s.name)}">${esc(s.name.charAt(0).toUpperCase())}</div>
       <div class="info">
         <div class="name">${esc(s.name)}${badges}</div>
@@ -2508,27 +2508,35 @@
   $('navShade').onclick = () => setNav(false);
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) { setNav(false); $('menuBtn').focus(); } });
 
-  // Tema chiaro / scuro: la scelta resta salvata su questo dispositivo (non è un dato personale)
-  const isDark = () => {
-    const t = document.documentElement.getAttribute('data-theme');
-    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  // Menu sul computer: barra di sole icone (il nome compare passandoci sopra) oppure con i nomi.
+  // La scelta resta salvata su questo dispositivo. Sul telefono il menu resta il cassetto con i nomi.
+  const navWide = on => {
+    document.body.classList.toggle('nav-wide', on);
+    $('navToggle').setAttribute('aria-pressed', String(on));
+    $('navToggle').querySelector('.nav-label').textContent = on ? 'Nascondi i nomi' : 'Mostra i nomi';
+    try { localStorage.setItem('finanze-menu', on ? 'nomi' : 'icone'); } catch (e) { /* vale fino alla chiusura */ }
   };
-  function themeLabel() {
-    const dark = isDark(), l = dark ? 'Passa al tema chiaro' : 'Passa al tema scuro';
-    $('themeBtn').setAttribute('aria-label', l);
-    $('themeBtn').title = l;
-    $('themeBtn').querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
-    document.querySelector('meta[name="theme-color"]').content = dark ? '#112326' : '#0E6B73';
+  try { navWide(localStorage.getItem('finanze-menu') === 'nomi'); } catch (e) { navWide(false); }
+  $('navToggle').onclick = () => { navWide(!document.body.classList.contains('nav-wide')); hideNavTip(); };
+  const railMode = () => !document.body.classList.contains('nav-wide') && matchMedia('(min-width: 901px)').matches;
+  function showNavTip(el) {
+    const label = el.querySelector('.nav-label');
+    if (!railMode() || !label) return;
+    const tip = $('navTip'), r = el.getBoundingClientRect();
+    tip.textContent = label.textContent;
+    tip.hidden = false;
+    tip.style.left = (r.right + 12) + 'px';
+    tip.style.top = (r.top + r.height / 2 - tip.offsetHeight / 2) + 'px';
   }
-  $('themeBtn').onclick = () => {
-    const next = isDark() ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('finanze-tema', next); } catch (e) { /* resta valido fino alla chiusura */ }
-    themeLabel();
-    if (state.transactions.length) renderToday(view);           // il grafico usa i colori del tema
-  };
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeLabel);
-  themeLabel();
+  function hideNavTip() { $('navTip').hidden = true; }
+  const side = $('sidebar');
+  side.addEventListener('mouseover', e => { const el = e.target.closest('a, .nav-toggle'); if (el) showNavTip(el); });
+  side.addEventListener('mouseleave', hideNavTip);
+  side.addEventListener('focusin', e => { const el = e.target.closest('a, .nav-toggle'); if (el && el.matches(':focus-visible')) showNavTip(el); });
+  side.addEventListener('focusout', hideNavTip);
+  side.addEventListener('scroll', hideNavTip, { passive: true });
+  window.addEventListener('resize', hideNavTip);
+  window.addEventListener('hashchange', hideNavTip);
 
   wireToday();
 
@@ -2920,6 +2928,59 @@
   // Bloccare = ricaricare la pagina: i dati in chiaro spariscono dalla memoria e si torna alla schermata di accesso.
   const lockNow = () => location.reload();
 
+  // ---------- Lampada della schermata di accesso ----------
+  // La cordicella si tira trascinandola verso il basso (oltre 28 px), con un tocco o con Invio/Spazio.
+  // Accesa: luce calda e modulo della password. Spenta: resta solo la lampada.
+  function setLamp(on) {
+    const scene = $('lampScene'), form = $('lockForm'), cord = $('lampCord');
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    scene.classList.toggle('on', on);
+    cord.setAttribute('aria-pressed', String(on));
+    cord.setAttribute('aria-label', on ? 'Spegni la lampada' : 'Accendi la lampada per accedere');
+    $('lampHint').textContent = on ? 'Tira di nuovo per spegnere' : 'Tira la cordicella per accedere';
+    clearTimeout(setLamp.t);
+    if (on) {
+      form.hidden = false;
+      form.classList.remove('leaving');
+      setLamp.t = setTimeout(() => $('lockPw').focus(), still ? 0 : 350);
+    } else {
+      form.classList.add('leaving');
+      setLamp.t = setTimeout(() => { form.hidden = true; form.classList.remove('leaving'); }, still ? 0 : 260);
+    }
+  }
+  function wireLamp() {
+    const cord = $('lampCord');
+    let startY = null, dy = 0, suppress = false;
+    const release = () => {
+      cord.style.transform = '';
+      cord.classList.remove('pulling');
+      cord.classList.add('swing');
+      setTimeout(() => cord.classList.remove('swing'), 700);
+    };
+    cord.addEventListener('pointerdown', e => {
+      startY = e.clientY; dy = 0; cord.setPointerCapture(e.pointerId); cord.classList.add('pulling');
+    });
+    cord.addEventListener('pointermove', e => {
+      if (startY === null) return;
+      dy = Math.max(0, Math.min(72, e.clientY - startY));
+      cord.style.transform = `translateY(${dy}px)`;
+    });
+    const end = () => {
+      if (startY === null) return;
+      startY = null;
+      if (dy > 28) { suppress = true; setLamp(!$('lampScene').classList.contains('on')); }
+      else if (dy >= 6) suppress = true;                       // trascinata poco: non cambia niente
+      release();
+    };
+    cord.addEventListener('pointerup', end);
+    cord.addEventListener('pointercancel', end);
+    cord.addEventListener('click', () => {                    // tocco o tastiera
+      if (suppress) { suppress = false; return; }
+      setLamp(!$('lampScene').classList.contains('on'));
+      release();
+    });
+  }
+
   function lockError(msg) {
     $('lockErr').textContent = msg;
     $('lockErr').hidden = !msg;
@@ -2929,20 +2990,21 @@
     if (!Vault.supported) {
       $('lockHint').textContent = 'Questo browser non permette di cifrare i dati. Apri l\'app con Chrome, Edge, Firefox o Safari aggiornati.';
       $('lockForm').querySelectorAll('input, button').forEach(el => { el.hidden = true; });
+      wireLamp();
       return;
     }
     const setup = !Vault.exists();
     const legacy = localStorage.getItem(STORE_KEY);          // dati salvati in chiaro dalle versioni precedenti
-    $('lockTitle').textContent = setup ? 'Crea la tua password' : 'Gestionale finanze';
+    $('lockTitle').textContent = setup ? 'Crea la tua password.' : 'Eccoti di nuovo.';
     $('lockHint').innerHTML = setup
       ? `Scegli una password (almeno ${MIN_PW} caratteri) per proteggere i tuoi dati: verranno cifrati e serviranno a ogni accesso.
          <b>Se la dimentichi non potrai recuperarli</b>: non è salvata da nessuna parte.`
-      : 'Inserisci la password per entrare.';
+      : 'La luce è accesa: scrivi la password per entrare.';
     $('lockPw2').hidden = $('lockPw2Label').hidden = !setup;
     $('lockPw').autocomplete = setup ? 'new-password' : 'current-password';
     $('lockBtn').textContent = setup ? 'Crea password ed entra' : 'Entra';
     $('forgotBtn').hidden = setup;
-    $('lockPw').focus();
+    wireLamp();
 
     $('lockForm').onsubmit = async e => {
       e.preventDefault();
