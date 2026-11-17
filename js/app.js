@@ -1439,7 +1439,7 @@
     });
     $('tdFreed').addEventListener('click', e => {
       if (!e.target.closest('[data-freed-hide]')) return;
-      state.freed.hidden = true; save(); renderFreed();
+      state.freed.hidden = true; save(); renderFreed(); renderHidden();
       toast('Soldi liberati nascosto.', () => { state.freed.hidden = false; save(); renderFreed(); });
       $('tdAmount').focus();
     });
@@ -2418,6 +2418,7 @@
     renderSpese(view);
     renderLimits();
     renderCash();
+    renderHidden();
   }
 
   // ---------- Promemoria calendario (.ics) ----------
@@ -3158,6 +3159,18 @@
       showStatus('Backup importato.');
     } catch (err) { showStatus('Backup non valido: ' + esc(err.message), true); }
   };
+  // Sezioni nascoste: "Soldi liberati" si può far ricomparire da qui
+  function renderHidden() {
+    const hidden = !!(state.freed && state.freed.hidden);
+    $('showFreedBtn').hidden = !hidden;
+    $('hiddenText').textContent = hidden ? 'Hai nascosto "Soldi liberati" dalla Home.' : 'Nessuna sezione nascosta.';
+  }
+  $('showFreedBtn').onclick = () => {
+    state.freed.hidden = false; save(); render(); renderHidden();
+    toast('"Soldi liberati" è di nuovo in Home.');
+  };
+  window.addEventListener('hashchange', () => { if (location.hash === '#/impostazioni') renderHidden(); });
+
   $('resetBtn').onclick = () => {
     if (!confirm('Cancellare tutti i movimenti e gli abbonamenti salvati?')) return;
     state = empty();
