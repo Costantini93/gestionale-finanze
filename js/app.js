@@ -517,7 +517,7 @@
       <summary>${summary}</summary>
       <ul class="tx-mini">${sorted.map(t => `<li>
         <span class="tx-date">${fmtDate(t.date)}</span>
-        <span class="tx-what">${esc(t.roundups ? roundupName(t) : Detector.merchantText(t.desc).slice(0, 60))}</span>
+        <span class="tx-what">${esc(t.roundups ? roundupName(t) : Detector.merchantText(t.desc).slice(0, 60))}${t.pending ? ' <small class="muted">in sospeso</small>' : ''}</span>
         <b class="${t.amount < 0 ? 'neg' : 'pos'}">${t.amount < 0 ? '−' : '+'}${eur.format(Math.abs(t.amount))}</b>
       </li>`).join('')}</ul>
       ${search ? `<button class="link small" data-search="${esc(search)}">Cerca tutti i movimenti</button>` : ''}
@@ -607,7 +607,8 @@
     const subTxs = new Map();          // movimento → abbonamento a cui appartiene
     for (const s of view.subs) for (const t of s.txs || []) subTxs.set(t, s);
 
-    const everything = state.transactions.map(t => ({ t, cat: txCategory(t, subTxs) }));
+    // Movimenti della banca + spese ancora in sospeso (non contabilizzate): sono spese già fatte, contano ovunque
+    const everything = [...state.transactions, ...livePending()].map(t => ({ t, cat: txCategory(t, subTxs) }));
     const all = everything.filter(x => !(Categories.byId[x.cat] || {}).excluded
       && !(state.settings.excludeDeposits && x.cat === 'versamenti'));
     searchRows = everything;
@@ -724,7 +725,7 @@
       const p = party(x.t);
       (groups[p.key || p.name] = groups[p.key || p.name] || { p, cat: x.cat, txs: [] }).txs.push(x.t);
     }
-    const dataEnd = planRows.reduce((m, x) => !x.t.manual && x.t.date > m ? x.t.date : m, '');
+    const dataEnd = planRows.reduce((m, x) => !x.t.manual && !x.t.pending && x.t.date > m ? x.t.date : m, '');
     return Object.values(groups).filter(g => new Set(g.txs.map(t => t.date.slice(0, 7))).size >= 2).map(g => {
       const last = g.txs.sort((a, b) => a.date.localeCompare(b.date))[g.txs.length - 1];
       return { key: 'fix:' + (g.p.key || g.p.name), name: g.cat === 'affitto' ? 'Affitto (' + g.p.name + ')' : 'Rata ' + g.p.name, amount: Math.abs(last.amount), lastDate: last.date, frequency: 'mensile' };
@@ -752,7 +753,7 @@
 
   // Spesa variabile media al giorno sugli ultimi 90 giorni di dati.
   function dailyRate() {
-    const dates = planRows.filter(x => !x.t.manual).map(x => x.t.date).sort();
+    const dates = planRows.filter(x => !x.t.manual && !x.t.pending).map(x => x.t.date).sort();
     if (!dates.length) return 0;
     const end = dates[dates.length - 1], start = addDays(end, -89) > dates[0] ? addDays(end, -89) : dates[0];
     const days = Detector.daysBetween(start, end) + 1;
@@ -787,19 +788,20 @@
 
   // Spese in sospeso non ancora arrivate come movimenti definitivi: lo stesso importo contabilizzato
   // da 1 giorno prima a 6 giorni dopo vuol dire che è arrivata. Dopo 20 giorni si considera superata.
+  // Restituisce copie con pending: true, che entrano in tutte le pagine (con la scritta "in sospeso").
   function livePending() {
     const used = new Set(), today = todayIso();
-    const booked = planRows.filter(x => !x.t.manual && x.t.amount < 0);
+    const booked = bankTx().filter(t => t.amount < 0);
     return (state.pendingTx || []).filter(p => {
       if (p.amount >= 0 || Detector.daysBetween(p.date, today) > 20) return false;
-      const hit = booked.find(x => {
-        if (used.has(x.t) || Math.abs(x.t.amount - p.amount) >= 0.01) return false;
-        const d = Detector.daysBetween(p.date, realWhen(x.t).date);
+      const hit = booked.find(t => {
+        if (used.has(t) || Math.abs(t.amount - p.amount) >= 0.01) return false;
+        const d = Detector.daysBetween(p.date, realWhen(t).date);
         return d >= -1 && d <= 6;
       });
-      if (hit) { used.add(hit.t); return false; }
+      if (hit) { used.add(hit); return false; }
       return true;
-    });
+    }).map(p => Object.assign({}, p, { pending: true }));
   }
 
   let tdModel = null;
@@ -812,11 +814,11 @@
     for (let d = start; d < next && days.length < 40; d = addDays(d, 1)) days.push(d);
     const T = Math.max(0, days.indexOf(today));
     const matched = matchQuick();
-    const dataEnd = planRows.reduce((m, x) => !x.t.manual && x.t.date > m ? x.t.date : m, '');
+    const dataEnd = planRows.reduce((m, x) => !x.t.manual && !x.t.pending && x.t.date > m ? x.t.date : m, '');
 
     // Spese in sospeso in banca (dall'ultimo Excel) e spese aggiunte a mano: se una spesa a mano
     // corrisponde a una in sospeso (importo vicino, da 1 giorno prima a 4 dopo) conta quella della banca.
-    const pend = livePending().map(t => ({ t, cat: txCategory(t, new Map()) })).filter(isVariable);
+    const pend = planRows.filter(x => x.t.pending && isVariable(x));
     const usedPend = new Set();
     const quickLeft = state.quick.filter(q => {
       if (matched.has(q.id)) return false;
@@ -826,8 +828,7 @@
       return true;
     });
     const spends = [
-      ...planRows.filter(x => !x.t.manual && isVariable(x)).map(x => ({ date: realWhen(x.t).date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, order: 0 })),
-      ...pend.map(x => ({ date: x.t.date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, pending: true, order: 1 })),
+      ...planRows.filter(x => !x.t.manual && isVariable(x)).map(x => ({ date: realWhen(x.t).date, amount: -x.t.amount, cat: x.cat, name: party(x.t).name, pending: !!x.t.pending, order: x.t.pending ? 1 : 0 })),
       ...quickLeft.map(q => ({ date: q.date, amount: q.amount, cat: q.cat, name: q.note, quick: q, order: quickTime(q) })),
     ];
     const byDay = days.map(() => 0), byCat = {}, quickDays = new Set();
@@ -1822,7 +1823,7 @@
           <summary>
             <span class="tx-date">${fmtDate(t.date)}</span>
             <span class="tx-name">${esc(t.roundups ? roundupName(t) : mk ? titleCase(mk) : Detector.merchantText(t.desc).slice(0, 40))}
-              <small><span class="dot" style="background:${info.color}"></span>${esc(info.name)}</small></span>
+              <small><span class="dot" style="background:${info.color}"></span>${esc(info.name)}${t.pending ? ', in sospeso' : ''}</small></span>
             <span class="tx-amt ${t.amount < 0 ? 'neg' : 'pos'}">${t.amount < 0 ? '−' : '+'}${eur.format(Math.abs(t.amount))}</span>
           </summary>
           <p class="tx-desc">${esc(t.desc)}</p>
@@ -2143,8 +2144,8 @@
 
   function renderLimits() {
     const today = todayIso(), matched = matchQuick();
-    const dataEnd = planRows.reduce((m, x) => !x.t.manual && x.t.date > m ? x.t.date : m, '');
-    const dataStart = planRows.reduce((m, x) => !x.t.manual && (!m || x.t.date < m) ? x.t.date : m, '');
+    const dataEnd = planRows.reduce((m, x) => !x.t.manual && !x.t.pending && x.t.date > m ? x.t.date : m, '');
+    const dataStart = planRows.reduce((m, x) => !x.t.manual && !x.t.pending && (!m || x.t.date < m) ? x.t.date : m, '');
     const catName = id => (Categories.byId[id] || {}).name || id;
     const catColor = id => (Categories.byId[id] || {}).color || '#9ca3af';
 
@@ -2226,7 +2227,7 @@
         return `<div class="quick-row${t ? ' done' : ''}">
           <span class="tx-date">${fmtDate(q.date)}</span>
           <span><span class="dot" style="background:${catColor(q.cat)}"></span> ${esc(catName(q.cat))}${q.note ? ` <small class="muted">· ${esc(q.note)}</small>` : ''}</span>
-          <span class="badge ${t ? '' : 'warn'}">${t ? `✓ nell'estratto conto${Math.abs(-t.amount - q.amount) >= .01 ? ` (${eur.format(-t.amount)})` : ''}` : 'in attesa dell\'estratto conto'}</span>
+          <span class="badge ${t ? '' : 'warn'}">${t ? `✓ ${t.pending ? 'in banca, in sospeso' : 'nell\'estratto conto'}${Math.abs(-t.amount - q.amount) >= .01 ? ` (${eur.format(-t.amount)})` : ''}` : 'in attesa dell\'estratto conto'}</span>
           <b>${eur.format(q.amount)}</b>
           <button class="icon" data-quick-del="${esc(q.id)}" title="Elimina">🗑</button>
         </div>`;
@@ -2508,7 +2509,7 @@
         msgs.push(`<b>${esc(f.name)}</b>: ${tx.length} movimenti dal ${fmtDate(dates[0])} al ${fmtDate(dates[dates.length - 1])}` +
           (added < tx.length ? ` (${tx.length - added - fixedAmounts} già presenti, ignorati)` : '') +
           (fixedAmounts ? `. <b>Corretti ${fixedAmounts} importi</b> letti male in precedenza (es. stipendi sopra i 1.000 €).` : '') +
-          (tx.pending ? `. ${tx.pending} ${tx.pending === 1 ? 'spesa è ancora in sospeso' : 'spese sono ancora in sospeso'} in banca: ${tx.pending === 1 ? 'la conto' : 'le conto'} solo in "Oggi posso" finché non ${tx.pending === 1 ? 'arriva definitiva' : 'arrivano definitive'}.` : ''));
+          (tx.pending ? `. ${tx.pending} ${tx.pending === 1 ? 'spesa è ancora in sospeso' : 'spese sono ancora in sospeso'} in banca: ${tx.pending === 1 ? 'la conto' : 'le conto'} già in tutte le pagine, con la scritta "in sospeso", finché non ${tx.pending === 1 ? 'arriva definitiva' : 'arrivano definitive'}.` : ''));
         ok = true;
       } catch (e) {
         msgs.push(`<b>${esc(f.name)}</b>: ${e.html || 'errore — ' + esc(e.message)}`);
