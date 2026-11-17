@@ -910,9 +910,9 @@ body::before {
   background: none; border: 0; padding: 0; cursor: grab; touch-action: none; transform-origin: 50% 0;
 }
 .lamp-cord.pulling { cursor: grabbing; }
-.lamp-cord:not(.pulling) { transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
-.cord-line { position: absolute; left: 50%; top: 0; bottom: 18px; width: 2px; margin-left: -1px; background: linear-gradient(#C9A46A, #8C6C40); }
-.cord-bead { position: absolute; left: 50%; bottom: 4px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #F3D9A4, #A47C44); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3); }
+.lamp-cord:not(.pulling) .cord-line, .lamp-cord:not(.pulling) .cord-bead { transition: height .25s cubic-bezier(.3, 1.6, .5, 1), transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+.cord-line { position: absolute; left: 50%; top: 0; height: calc(100% - 18px + var(--pull, 0px)); width: 2px; margin-left: -1px; background: linear-gradient(#C9A46A, #8C6C40); }
+.cord-bead { position: absolute; left: 50%; bottom: 4px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; transform: translateY(var(--pull, 0px)); background: radial-gradient(circle at 35% 35%, #F3D9A4, #A47C44); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3); }
 .lamp-scene.on .cord-bead { box-shadow: 0 0 12px rgba(255, 205, 140, .7); }
 .lamp-cord:focus-visible { outline: 2px solid var(--lamp-warm); outline-offset: 4px; border-radius: 12px; }
 .lamp-cord.swing { animation: cordSwing .7s ease-out; }
@@ -956,6 +956,7 @@ body::before {
 }
 @media (prefers-reduced-motion: reduce) {
   .lock .lock-box, .lock .lock-box.leaving, .lamp-cord.swing { animation: none; }
+  .lamp-cord .cord-line, .lamp-cord .cord-bead { transition: none !important; }
 }
 
 /* ---------- Pagina Bollette ---------- */
@@ -977,3 +978,9 @@ body::before {
 .bill-paid b { font-family: var(--display); font-weight: 600; font-variant-numeric: tabular-nums; }
 .bill-type select { min-height: 44px; }
 .page[data-page="bollette"] .focus-h { text-transform: none; letter-spacing: 0; font: 600 18px/1.25 var(--display); color: var(--text); margin-top: 24px; }
+
+/* Menu a tendina: la lista che si apre usa i colori del sistema. Con color-scheme scuro e
+   sfondo pieno per le voci, il testo chiaro resta leggibile (prima era chiaro su grigio chiaro). */
+select { color-scheme: dark; }
+select option, select optgroup { background-color: #0E2024; color: #EEF7F7; }
+select option:checked { background-color: #1B4A50; color: #FFFFFF; }

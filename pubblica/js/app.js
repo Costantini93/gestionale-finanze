@@ -3031,8 +3031,9 @@
   function wireLamp() {
     const cord = $('lampCord');
     let startY = null, dy = 0, suppress = false;
+    // Il filo resta attaccato al paralume e si allunga; scende solo la pallina (variabile --pull)
     const release = () => {
-      cord.style.transform = '';
+      cord.style.removeProperty('--pull');
       cord.classList.remove('pulling');
       cord.classList.add('swing');
       setTimeout(() => cord.classList.remove('swing'), 700);
@@ -3043,7 +3044,7 @@
     cord.addEventListener('pointermove', e => {
       if (startY === null) return;
       dy = Math.max(0, Math.min(72, e.clientY - startY));
-      cord.style.transform = `translateY(${dy}px)`;
+      cord.style.setProperty('--pull', dy + 'px');
     });
     const end = () => {
       if (startY === null) return;
