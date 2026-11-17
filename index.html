@@ -22,19 +22,52 @@
 <body class="locked">
   <!-- Schermata di accesso: i dati sono cifrati e si aprono solo con la password -->
   <div id="lock" class="lock">
-    <form id="lockForm" class="lock-box" autocomplete="on">
-      <div class="lock-icon"><svg class="ico"><use href="#i-lock"/></svg></div>
-      <h2 id="lockTitle">Gestionale finanze</h2>
-      <p id="lockHint" class="muted"></p>
-      <input type="text" name="username" value="gestionale-abbonamenti" autocomplete="username" hidden>
-      <label class="lock-label" for="lockPw">Password</label>
-      <input type="password" id="lockPw" required>
-      <label class="lock-label" for="lockPw2" id="lockPw2Label" hidden>Ripeti la password</label>
-      <input type="password" id="lockPw2" autocomplete="new-password" hidden>
-      <p id="lockErr" class="lock-err" hidden></p>
-      <button class="btn" id="lockBtn" type="submit">Entra</button>
-      <button type="button" class="link small" id="forgotBtn" hidden>Ho dimenticato la password</button>
-    </form>
+    <!-- Schermata di accesso: una lampada spenta. Tirando la cordicella si accende e compare il modulo della password;
+         tirandola di nuovo si spegne e resta solo la lampada. -->
+    <div class="lamp-scene" id="lampScene">
+      <div class="lamp">
+        <div class="lamp-light" aria-hidden="true"></div>
+        <svg class="lamp-svg" viewBox="0 0 240 560" aria-hidden="true">
+          <defs>
+            <linearGradient id="shadeLit" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#FBE3B8"/><stop offset="1" stop-color="#E9B46A"/>
+            </linearGradient>
+            <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#8A6A3E"/><stop offset=".5" stop-color="#D8B57A"/><stop offset="1" stop-color="#7A5C34"/>
+            </linearGradient>
+          </defs>
+          <path class="lamp-shade" d="M72 34 H168 L206 150 H34 Z"/>
+          <g class="lamp-pleats">
+            <line x1="88" y1="34" x2="66" y2="150"/><line x1="104" y1="34" x2="96" y2="150"/><line x1="120" y1="34" x2="120" y2="150"/>
+            <line x1="136" y1="34" x2="144" y2="150"/><line x1="152" y1="34" x2="174" y2="150"/>
+          </g>
+          <ellipse class="lamp-bulb" cx="120" cy="150" rx="86" ry="7"/>
+          <rect class="lamp-metal" x="117" y="150" width="6" height="282" rx="3"/>
+          <rect class="lamp-metal" x="110" y="244" width="20" height="9" rx="3"/>
+          <circle class="lamp-metal" cx="120" cy="434" r="9"/>
+          <path class="lamp-leg" d="M120 434 L42 552"/><path class="lamp-leg" d="M120 434 L198 552"/><path class="lamp-leg" d="M120 434 L124 556"/>
+        </svg>
+        <button class="lamp-cord" id="lampCord" type="button" aria-pressed="false" aria-controls="lockForm" aria-label="Accendi la lampada per accedere">
+          <span class="cord-line"></span><span class="cord-bead"></span>
+        </button>
+        <p class="lamp-hint" id="lampHint">Tira la cordicella per accedere</p>
+      </div>
+      <div class="lamp-slot">
+        <form id="lockForm" class="lock-box" autocomplete="on" hidden>
+          <p class="lock-kicker">Gestionale finanze</p>
+          <h2 id="lockTitle">Eccoti di nuovo.</h2>
+          <p id="lockHint" class="muted"></p>
+          <input type="text" name="username" value="gestionale-abbonamenti" autocomplete="username" hidden>
+          <label class="lock-label" for="lockPw">Password</label>
+          <input type="password" id="lockPw" required>
+          <label class="lock-label" for="lockPw2" id="lockPw2Label" hidden>Ripeti la password</label>
+          <input type="password" id="lockPw2" autocomplete="new-password" hidden>
+          <p id="lockErr" class="lock-err" hidden></p>
+          <button class="btn" id="lockBtn" type="submit">Entra</button>
+          <button type="button" class="link small" id="forgotBtn" hidden>Ho dimenticato la password</button>
+        </form>
+      </div>
+    </div>
   </div>
 
   <!-- Icone (stile Feather, licenza MIT) -->

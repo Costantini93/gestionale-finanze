@@ -2928,6 +2928,59 @@
   // Bloccare = ricaricare la pagina: i dati in chiaro spariscono dalla memoria e si torna alla schermata di accesso.
   const lockNow = () => location.reload();
 
+  // ---------- Lampada della schermata di accesso ----------
+  // La cordicella si tira trascinandola verso il basso (oltre 28 px), con un tocco o con Invio/Spazio.
+  // Accesa: luce calda e modulo della password. Spenta: resta solo la lampada.
+  function setLamp(on) {
+    const scene = $('lampScene'), form = $('lockForm'), cord = $('lampCord');
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    scene.classList.toggle('on', on);
+    cord.setAttribute('aria-pressed', String(on));
+    cord.setAttribute('aria-label', on ? 'Spegni la lampada' : 'Accendi la lampada per accedere');
+    $('lampHint').textContent = on ? 'Tira di nuovo per spegnere' : 'Tira la cordicella per accedere';
+    clearTimeout(setLamp.t);
+    if (on) {
+      form.hidden = false;
+      form.classList.remove('leaving');
+      setLamp.t = setTimeout(() => $('lockPw').focus(), still ? 0 : 350);
+    } else {
+      form.classList.add('leaving');
+      setLamp.t = setTimeout(() => { form.hidden = true; form.classList.remove('leaving'); }, still ? 0 : 260);
+    }
+  }
+  function wireLamp() {
+    const cord = $('lampCord');
+    let startY = null, dy = 0, suppress = false;
+    const release = () => {
+      cord.style.transform = '';
+      cord.classList.remove('pulling');
+      cord.classList.add('swing');
+      setTimeout(() => cord.classList.remove('swing'), 700);
+    };
+    cord.addEventListener('pointerdown', e => {
+      startY = e.clientY; dy = 0; cord.setPointerCapture(e.pointerId); cord.classList.add('pulling');
+    });
+    cord.addEventListener('pointermove', e => {
+      if (startY === null) return;
+      dy = Math.max(0, Math.min(72, e.clientY - startY));
+      cord.style.transform = `translateY(${dy}px)`;
+    });
+    const end = () => {
+      if (startY === null) return;
+      startY = null;
+      if (dy > 28) { suppress = true; setLamp(!$('lampScene').classList.contains('on')); }
+      else if (dy >= 6) suppress = true;                       // trascinata poco: non cambia niente
+      release();
+    };
+    cord.addEventListener('pointerup', end);
+    cord.addEventListener('pointercancel', end);
+    cord.addEventListener('click', () => {                    // tocco o tastiera
+      if (suppress) { suppress = false; return; }
+      setLamp(!$('lampScene').classList.contains('on'));
+      release();
+    });
+  }
+
   function lockError(msg) {
     $('lockErr').textContent = msg;
     $('lockErr').hidden = !msg;
@@ -2937,20 +2990,21 @@
     if (!Vault.supported) {
       $('lockHint').textContent = 'Questo browser non permette di cifrare i dati. Apri l\'app con Chrome, Edge, Firefox o Safari aggiornati.';
       $('lockForm').querySelectorAll('input, button').forEach(el => { el.hidden = true; });
+      wireLamp();
       return;
     }
     const setup = !Vault.exists();
     const legacy = localStorage.getItem(STORE_KEY);          // dati salvati in chiaro dalle versioni precedenti
-    $('lockTitle').textContent = setup ? 'Crea la tua password' : 'Gestionale finanze';
+    $('lockTitle').textContent = setup ? 'Crea la tua password.' : 'Eccoti di nuovo.';
     $('lockHint').innerHTML = setup
       ? `Scegli una password (almeno ${MIN_PW} caratteri) per proteggere i tuoi dati: verranno cifrati e serviranno a ogni accesso.
          <b>Se la dimentichi non potrai recuperarli</b>: non è salvata da nessuna parte.`
-      : 'Inserisci la password per entrare.';
+      : 'La luce è accesa: scrivi la password per entrare.';
     $('lockPw2').hidden = $('lockPw2Label').hidden = !setup;
     $('lockPw').autocomplete = setup ? 'new-password' : 'current-password';
     $('lockBtn').textContent = setup ? 'Crea password ed entra' : 'Entra';
     $('forgotBtn').hidden = setup;
-    $('lockPw').focus();
+    wireLamp();
 
     $('lockForm').onsubmit = async e => {
       e.preventDefault();
