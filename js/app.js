@@ -35,8 +35,6 @@
     budgetLog: {}, freed: { movedUntil: null, hidden: false },
     // recapSeen: inizio del periodo di cui il riepilogo è già stato visto o rimandato
     recapSeen: null,
-    // invest: operazioni in crypto ({ id, type: 'buy'|'sell', coin, qty, price, fee, date }), prezzi e storico scaricati, monete aggiunte a mano
-    invest: { ops: [], prices: {}, hist: {}, custom: {} },
     // excludeDeposits: non contare i versamenti di contanti come entrate (sono già registrati a mano come contanti)
     settings: { remindDays: 2, excludeDeposits: false } });
   // Dal dettaglio prestito nell'app della banca (ottobre 2026): 9 rate mensili ciascuno
@@ -60,7 +58,7 @@
     s.savings = Object.assign(empty().savings, s.savings);
     s.savings.emergency = Object.assign(empty().savings.emergency, s.savings.emergency);
     s.freed = Object.assign(empty().freed, s.freed);
-    s.invest = Object.assign(empty().invest, s.invest);
+    delete s.invest; // la pagina Investimenti è stata tolta: i dati vecchi non servono più
     // Prestiti registrati una volta sola al primo accesso (poi si possono modificare o eliminare dalla pagina Prestiti)
     if (!s.loansPreset) {
       for (const l of PRESET_LOANS) if (!s.loans.some(x => x.id === l.id || (x.rate === l.rate && x.first === l.first))) s.loans.push(Object.assign({}, l));
@@ -1375,256 +1373,6 @@
       ${same ? '<p class="td-foot">Questo limite è già attivo.</p>' : `<button class="btn" type="button" data-dv-cap="${cap}">Imposta il limite di ${money0(cap)} al mese</button>`}`;
   }
 
-  // =====================================================================
-  //  Investimenti in crypto: operazioni (acquisti e vendite), valore di oggi con i prezzi di CoinGecko,
-  //  andamento nel tempo e movimenti del conto verso gli exchange.
-  //  A CoinGecko si mandano solo gli identificativi delle monete (es. "ripple"), mai quantità o altri dati.
-  // =====================================================================
-  const INV_COINS = [
-    ['bitcoin', 'BTC', 'Bitcoin'], ['ethereum', 'ETH', 'Ethereum'], ['ripple', 'XRP', 'XRP'], ['solana', 'SOL', 'Solana'],
-    ['binancecoin', 'BNB', 'BNB'], ['cardano', 'ADA', 'Cardano'], ['dogecoin', 'DOGE', 'Dogecoin'], ['tron', 'TRX', 'TRON'],
-    ['the-open-network', 'TON', 'Toncoin'], ['avalanche-2', 'AVAX', 'Avalanche'], ['polkadot', 'DOT', 'Polkadot'], ['chainlink', 'LINK', 'Chainlink'],
-    ['litecoin', 'LTC', 'Litecoin'], ['stellar', 'XLM', 'Stellar'], ['shiba-inu', 'SHIB', 'Shiba Inu'], ['pepe', 'PEPE', 'Pepe'],
-    ['tether', 'USDT', 'Tether'], ['usd-coin', 'USDC', 'USD Coin'],
-  ];
-  const CG = 'https://api.coingecko.com/api/v3';
-  const CDC = 'https://api.crypto.com/exchange/v1/public/get-tickers?instrument_name=';
-  const invState = () => state.invest || (state.invest = { ops: [], prices: {}, hist: {}, custom: {} });
-  const coinInfo = id => { const c = INV_COINS.find(x => x[0] === id); if (c) return { id, symbol: c[1], name: c[2] }; const k = invState().custom[id]; return k ? Object.assign({ id }, k) : { id, symbol: id.toUpperCase(), name: id }; };
-  const qtyFmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 8 });
-  const priceFmt = n => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 6 : 2 }) + NB + '€';
-  const opCost = o => o.qty * o.price + (o.fee || 0);
-
-  // Posizioni: per ogni moneta quantità posseduta, costo di carico (con le commissioni) e guadagno già realizzato.
-  // Vendita al costo medio: il costo di carico scende in proporzione alla quantità venduta.
-  function invPositions(upTo) {
-    const pos = {};
-    for (const o of [...invState().ops].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))) {
-      if (upTo && o.date > upTo) continue;
-      const p = pos[o.coin] || (pos[o.coin] = { coin: o.coin, qty: 0, cost: 0, realized: 0, bought: 0 });
-      if (o.type === 'buy') { p.qty += o.qty; p.cost += opCost(o); p.bought += opCost(o); }
-      else {
-        const avg = p.qty > 0 ? p.cost / p.qty : 0, q = Math.min(o.qty, p.qty);
-        p.realized += q * o.price - (o.fee || 0) - avg * q;
-        p.cost -= avg * q; p.qty -= q;
-      }
-    }
-    return pos;
-  }
-  async function cgGet(path) {
-    const r = await fetch(CG + path, { headers: { accept: 'application/json' } });
-    if (!r.ok) throw new Error('CoinGecko ' + r.status);
-    return r.json();
-  }
-  // Ultimo prezzo di una coppia sull'exchange di Crypto.com (API pubblica, nessun dato personale); null se non c'è
-  async function cdcLast(pair) {
-    try {
-      const r = await fetch(CDC + encodeURIComponent(pair), { headers: { accept: 'application/json' } });
-      if (!r.ok) return null;
-      const j = await r.json(), t = j && j.code === 0 && j.result && j.result.data && j.result.data[0];
-      const v = t ? parseFloat(t.a) : NaN;
-      return v > 0 ? v : null;
-    } catch (e) { return null; }
-  }
-  let invFetching = false, invError = '';
-  // Prezzi di oggi (al massimo ogni 5 minuti) e storico giornaliero (al massimo ogni 6 ore), solo per le monete possedute
-  async function refreshInvest(force) {
-    const S = invState(), ids = [...new Set(S.ops.map(o => o.coin))];
-    if (!ids.length || invFetching || !navigator.onLine) return;
-    const now = Date.now(), stale = id => !S.prices[id] || now - S.prices[id].at > 5 * 60e3;
-    invFetching = true; invError = '';
-    try {
-      if (force || ids.some(stale)) {
-        const data = await cgGet(`/simple/price?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=eur,usd`);
-        for (const id of ids) if (data[id] && typeof data[id].eur === 'number') S.prices[id] = { eur: data[id].eur, at: now, src: 'cg' };
-        // Dove possibile il prezzo viene da Crypto.com (dove sono state comprate le monete): coppia in euro,
-        // altrimenti coppia in dollari convertita con il cambio implicito di CoinGecko. Se non risponde resta CoinGecko.
-        await Promise.all(ids.map(async id => {
-          const sym = coinInfo(id).symbol.toUpperCase(), cg = data[id] || {};
-          let eurPrice = await cdcLast(sym + '_EUR');
-          if (eurPrice === null && cg.eur > 0 && cg.usd > 0) {
-            const usd = await cdcLast(sym + '_USD');
-            if (usd !== null) eurPrice = usd * cg.eur / cg.usd;
-          }
-          if (eurPrice !== null) S.prices[id] = { eur: eurPrice, at: now, src: 'cdc' };
-        }));
-      }
-      const first = S.ops.reduce((m, o) => !m || o.date < m ? o.date : m, '');
-      const days = Math.min(365, Math.max(2, Detector.daysBetween(first, todayIso()) + 2));
-      for (const id of ids) {
-        const h = S.hist[id];
-        if (h && now - h.at < 6 * 3600e3 && h.days >= days) continue;
-        const data = await cgGet(`/coins/${encodeURIComponent(id)}/market_chart?vs_currency=eur&days=${days}&interval=daily`);
-        const map = {};
-        for (const [ms, price] of data.prices || []) { const d = new Date(ms); map[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`] = price; }
-        S.hist[id] = { at: now, days, prices: map };
-      }
-      saveSoon();
-    } catch (e) {
-      invError = 'Non riesco a scaricare i prezzi aggiornati adesso: uso gli ultimi salvati. Riprova tra qualche minuto.';
-    } finally {
-      invFetching = false;
-      if (location.hash === '#/investimenti') renderInvest();
-    }
-  }
-
-  function renderInvest() {
-    const S = invState(), pos = invPositions(), coins = Object.values(pos).filter(p => p.qty > 1e-12 || p.realized);
-    const sel = $('invCoin'), keep = sel.value;
-    const owned = Object.keys(S.custom).map(id => [id, S.custom[id].symbol, S.custom[id].name]);
-    sel.innerHTML = [...INV_COINS, ...owned].map(([id, sym, name]) => `<option value="${esc(id)}">${esc(name)}${sym !== name ? ` (${esc(sym)})` : ''}</option>`).join('') + '<option value="__altra">Altra moneta…</option>';
-    sel.value = keep || 'ripple';
-    $('invOtherBox').hidden = sel.value !== '__altra';
-    if (!$('invDate').value) $('invDate').value = todayIso();
-    $('invDate').max = todayIso();
-    invTotal();
-
-    let invested = 0, value = 0, realized = 0, missing = 0, oldest = Infinity;
-    const rows = coins.map(p => {
-      const pr = S.prices[p.coin];
-      if (p.qty > 1e-12 && !pr) missing++;
-      if (pr) oldest = Math.min(oldest, pr.at);
-      const v = pr ? p.qty * pr.eur : null;
-      invested += p.cost; realized += p.realized; if (v !== null) value += v;
-      return { p, pr, v, gain: v === null ? null : v - p.cost };
-    });
-    const gain = value - invested, pct = invested > 0 ? gain / invested * 100 : 0;
-    const word = g => g >= 0 ? 'Guadagno' : 'Perdita';
-    const when = oldest < Infinity ? new Date(oldest).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
-    $('invKpis').innerHTML = `
-      <div class="kpi"><span class="label">Investito</span><span class="value">${eur.format(invested)}</span><span class="hint">costo di carico, con le commissioni</span></div>
-      <div class="kpi"><span class="label">Valore oggi</span><span class="value accent">${missing ? '–' : eur.format(value)}</span><span class="hint">${invFetching ? 'aggiornamento dei prezzi…' : when ? 'prezzi delle ' + when : 'prezzi non ancora scaricati'}</span></div>
-      <div class="kpi"><span class="label">${word(gain)}</span><span class="value ${gain >= 0 ? 'pos' : 'neg'}">${missing ? '–' : (gain >= 0 ? '+' : '−') + eur.format(Math.abs(gain))}</span><span class="hint">${missing ? '' : (gain >= 0 ? '+' : '−') + Math.abs(pct).toLocaleString('it-IT', { maximumFractionDigits: 1 }) + '% su quanto investito'}</span></div>
-      <div class="kpi"><span class="label">Già realizzato</span><span class="value ${realized >= 0 ? 'pos' : 'neg'}">${(realized >= 0 ? '+' : '−') + eur.format(Math.abs(realized))}</span><span class="hint">guadagno o perdita delle vendite</span></div>`;
-
-    $('invCoins').innerHTML = `<div class="card-head"><h2>Le tue monete</h2><button class="btn ghost small-btn" type="button" id="invRefresh"${invFetching ? ' disabled' : ''}>Aggiorna i prezzi</button></div>
-      ${invError ? `<p class="status error">${esc(invError)}</p>` : ''}
-      ${rows.length ? `<div class="td-tablewrap"><table class="inv-table">
-        <thead><tr><th scope="col">Moneta</th><th scope="col">Quantità</th><th scope="col">Prezzo medio</th><th scope="col">Prezzo oggi</th><th scope="col">Valore</th><th scope="col">Guadagno o perdita</th><th scope="col">Peso</th></tr></thead>
-        <tbody>${rows.map(({ p, pr, v, gain: g }) => {
-          const c = coinInfo(p.coin);
-          return `<tr><th scope="row">${esc(c.name)}${c.symbol !== c.name ? ` <small>${esc(c.symbol)}</small>` : ''}</th>
-            <td>${qtyFmt(p.qty)}</td><td>${p.qty > 1e-12 ? priceFmt(p.cost / p.qty) : '–'}</td><td>${pr ? `${priceFmt(pr.eur)}<small class="inv-src">${pr.src === 'cdc' ? 'Crypto.com' : 'CoinGecko'}</small>` : '–'}</td>
-            <td><b>${v === null ? '–' : eur.format(v)}</b></td>
-            <td class="${g === null ? '' : g >= 0 ? 'pos' : 'neg'}">${g === null ? '–' : `${g >= 0 ? 'guadagno +' : 'perdita −'}${eur.format(Math.abs(g))} (${(p.cost ? Math.abs(g / p.cost * 100) : 0).toLocaleString('it-IT', { maximumFractionDigits: 1 })}%)`}</td>
-            <td>${v !== null && value > 0 ? Math.round(v / value * 100) + '%' : '–'}</td></tr>`;
-        }).join('')}</tbody></table></div>` : '<p class="muted">Nessun investimento ancora. Aggiungi il primo acquisto con il modulo qui sotto.</p>'}`;
-
-    renderInvestChart(pos);
-
-    const ops = [...S.ops].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-    $('invOps').innerHTML = `<h2>Operazioni</h2>${ops.length ? `<ul class="inv-ops">${ops.map(o => { const c = coinInfo(o.coin); return `<li>
-        <span class="tx-date">${fmtDate(o.date)}</span>
-        <span>${o.type === 'buy' ? 'Acquisto' : 'Vendita'} di <b>${qtyFmt(o.qty)} ${esc(c.symbol)}</b><small>a ${priceFmt(o.price)}${o.fee ? `, commissioni ${eur.format(o.fee)}` : ''}</small></span>
-        <b class="${o.type === 'buy' ? '' : 'pos'}">${eur.format(o.type === 'buy' ? opCost(o) : o.qty * o.price - (o.fee || 0))}</b>
-        <button class="td-del" type="button" data-inv-del="${esc(o.id)}" aria-label="Elimina ${o.type === 'buy' ? 'acquisto' : 'vendita'} di ${qtyFmt(o.qty)} ${esc(c.symbol)} del ${fmtDate(o.date)}">Elimina</button></li>`; }).join('')}</ul>` : '<p class="muted">Ancora nessuna operazione.</p>'}`;
-
-    // Movimenti del conto verso gli exchange (categoria "Investimenti e crypto")
-    const bank = planRows.filter(x => x.cat === 'investimenti').sort((a, b) => b.t.date.localeCompare(a.t.date));
-    const out = bank.filter(x => x.t.amount < 0).reduce((s, x) => s - x.t.amount, 0), back = bank.filter(x => x.t.amount > 0).reduce((s, x) => s + x.t.amount, 0);
-    const bought = Object.values(pos).reduce((s, p) => s + p.bought, 0);
-    $('invBank').innerHTML = `<h2>Dal conto</h2>
-      <p class="muted small">Bonifici e pagamenti verso gli exchange (Binance, Coinbase, Young Platform…). Contano come investimento, non come spesa: non toccano il budget di "Oggi posso".</p>
-      ${bank.length ? `<p>Dal conto sono partiti <b>${eur.format(out)}</b>${back ? ` e sono tornati <b>${eur.format(back)}</b>` : ''}. Hai registrato acquisti per <b>${eur.format(bought)}</b>.</p>
-        <ul class="inv-ops">${bank.slice(0, 12).map(x => `<li><span class="tx-date">${fmtDate(x.t.date)}</span><span>${esc(party(x.t).name)}${x.t.pending ? '<small>in sospeso</small>' : ''}</span>
-          <b class="${x.t.amount > 0 ? 'pos' : ''}">${x.t.amount > 0 ? '+' : '−'}${eur.format(Math.abs(x.t.amount))}</b><span></span></li>`).join('')}</ul>`
-        : '<p class="muted">Nessun movimento verso un exchange nell’estratto conto. Se un bonifico verso l’exchange è finito in un’altra categoria, spostalo in "Investimenti e crypto" dalla pagina Uscite.</p>'}`;
-  }
-
-  function renderInvestChart(pos) {
-    const S = invState(), el = $('invChart'), ops = [...S.ops].sort((a, b) => a.date.localeCompare(b.date));
-    if (!ops.length) { el.innerHTML = '<p class="muted">Il grafico compare dopo il primo acquisto.</p>'; return; }
-    const ids = [...new Set(ops.map(o => o.coin))];
-    if (ids.some(id => !S.hist[id])) { el.innerHTML = `<p class="muted">${invFetching ? 'Sto scaricando l’andamento dei prezzi…' : 'Andamento non disponibile: servono i prezzi passati, che si scaricano con la rete attiva.'}</p>`; return; }
-    const pts = [];
-    const last = {};
-    for (let d = ops[0].date; d <= todayIso(); d = addDays(d, 1)) {
-      const p = invPositions(d);
-      let v = 0, inv = 0;
-      for (const id of ids) {
-        const pr = (S.hist[id].prices[d] ?? (d === todayIso() && S.prices[id] ? S.prices[id].eur : undefined)) ?? last[id];
-        if (pr !== undefined) last[id] = pr;
-        if (p[id]) { v += p[id].qty * (last[id] || 0); inv += p[id].cost; }
-      }
-      pts.push({ d, v, inv });
-      if (pts.length > 400) break;
-    }
-    if (pts.length < 2) pts.unshift(Object.assign({}, pts[0], { d: addDays(pts[0].d, -1) }));
-    const W = Math.max(300, Math.floor(el.clientWidth || 600)), H = 190, mg = { t: 14, r: 12, b: 26, l: 12 };
-    const vals = pts.flatMap(p => [p.v, p.inv]), maxV = Math.max(...vals) * 1.04, minV = Math.min(...vals) * .96, span = Math.max(1, maxV - minV);
-    const x = i => mg.l + i * (W - mg.l - mg.r) / (pts.length - 1), y = v => mg.t + (maxV - v) * (H - mg.t - mg.b) / span;
-    const line = k => pts.map((p, i) => `${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
-    const end = pts[pts.length - 1], up = end.v >= end.inv;
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Valore degli investimenti dal ${fmtShort(pts[0].d)}: oggi ${eur.format(end.v)} contro ${eur.format(end.inv)} investiti">
-      <polygon points="${x(0).toFixed(1)},${H - mg.b} ${line('v')} ${x(pts.length - 1).toFixed(1)},${H - mg.b}" style="fill:${up ? 'var(--accent)' : 'var(--warn-mark)'}" opacity=".14"/>
-      <polyline points="${line('inv')}" fill="none" style="stroke:var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>
-      <polyline points="${line('v')}" fill="none" style="stroke:${up ? 'var(--accent)' : 'var(--warn-mark)'}" stroke-width="2.5" stroke-linejoin="round"/>
-      <text class="ax" x="${mg.l}" y="${H - 6}">${fmtShort(pts[0].d)}</text>
-      <text class="ax" x="${W - mg.r}" y="${H - 6}" text-anchor="end">oggi ${eur.format(end.v)}</text>
-    </svg>
-    <p class="td-legend"><span><i style="background:${up ? 'var(--accent)' : 'var(--warn-mark)'}"></i>Valore</span><span><i class="dash"></i>Investito</span></p>`;
-  }
-
-  function invTotal() {
-    const q = Parser.parseAmount($('invQty').value), pr = Parser.parseAmount($('invPrice').value), fee = Parser.parseAmount($('invFee').value) || 0;
-    const buy = $('invForm').querySelector('input[name=type]:checked').value === 'buy';
-    $('invTotal').textContent = q > 0 && pr > 0 ? `${buy ? 'Totale pagato' : 'Totale incassato'}: ${eur.format(buy ? q * pr + fee : q * pr - fee)}` : '';
-  }
-
-  function wireInvest() {
-    const f = $('invForm');
-    const err = (input, el, msg) => setFieldErr($(input), $(el), msg);
-    f.addEventListener('input', e => {
-      invTotal();
-      if (e.target.id === 'invQty') err('invQty', 'invQtyErr', '');
-      if (e.target.id === 'invPrice') err('invPrice', 'invPriceErr', '');
-      if (e.target.id === 'invOther') err('invOther', 'invOtherErr', '');
-    });
-    f.addEventListener('change', e => { if (e.target.id === 'invCoin') $('invOtherBox').hidden = e.target.value !== '__altra'; invTotal(); });
-    f.addEventListener('submit', async e => {
-      e.preventDefault();
-      const S = invState(), type = f.querySelector('input[name=type]:checked').value;
-      const qty = Parser.parseAmount($('invQty').value), price = Parser.parseAmount($('invPrice').value), fee = Math.abs(Parser.parseAmount($('invFee').value) || 0);
-      const date = $('invDate').value || todayIso();
-      let coin = $('invCoin').value, ok = true;
-      if (!(qty > 0)) { err('invQty', 'invQtyErr', 'Scrivi la quantità con un numero maggiore di zero, per esempio 565,116.'); ok = false; }
-      if (!(price > 0)) { err('invPrice', 'invPriceErr', 'Scrivi il prezzo di una moneta in euro, per esempio 0,85908.'); ok = false; }
-      if (coin === '__altra') {
-        const sym = $('invOther').value.trim().toUpperCase();
-        if (!sym) { err('invOther', 'invOtherErr', 'Scrivi la sigla della moneta, per esempio HBAR.'); ok = false; }
-        else if (ok) {
-          try {
-            const data = await cgGet('/search?query=' + encodeURIComponent(sym));
-            const hit = (data.coins || []).filter(c => String(c.symbol).toUpperCase() === sym).sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9))[0];
-            if (!hit) { err('invOther', 'invOtherErr', `Non trovo una moneta con la sigla ${sym}. Controlla come la scrive l'exchange.`); return; }
-            S.custom[hit.id] = { symbol: String(hit.symbol).toUpperCase(), name: hit.name };
-            coin = hit.id;
-          } catch (x) { err('invOther', 'invOtherErr', 'Per cercare una moneta nuova serve la rete. Riprova quando sei online.'); return; }
-        }
-      }
-      if (!ok) { (f.querySelector('[aria-invalid="true"]') || $('invQty')).focus(); return; }
-      if (type === 'sell') {
-        const held = (invPositions(date)[coin] || { qty: 0 }).qty;
-        if (qty > held + 1e-9) { err('invQty', 'invQtyErr', `Al ${fmtDate(date)} hai ${qtyFmt(held)} ${coinInfo(coin).symbol}: non puoi venderne di più.`); $('invQty').focus(); return; }
-      }
-      const op = { id: 'i' + Date.now().toString(36), type, coin, qty, price, fee, date };
-      S.ops.push(op);
-      save();
-      $('invQty').value = $('invPrice').value = $('invFee').value = ''; $('invOther').value = '';
-      renderInvest(); refreshInvest(true);
-      toast(`${type === 'buy' ? 'Acquisto' : 'Vendita'} aggiunt${type === 'buy' ? 'o' : 'a'}: ${qtyFmt(qty)} ${coinInfo(coin).symbol}.`, () => { S.ops = S.ops.filter(o => o.id !== op.id); save(); renderInvest(); });
-    });
-    $('invOps').addEventListener('click', e => {
-      const b = e.target.closest('[data-inv-del]'); if (!b) return;
-      const S = invState(), op = S.ops.find(o => o.id === b.dataset.invDel); if (!op) return;
-      S.ops = S.ops.filter(o => o !== op); save(); renderInvest();
-      toast('Operazione eliminata.', () => { S.ops.push(op); save(); renderInvest(); });
-    });
-    $('invCoins').addEventListener('click', e => { if (e.target.id === 'invRefresh') { refreshInvest(true); renderInvest(); } });
-    window.addEventListener('hashchange', () => { if (location.hash === '#/investimenti') { renderInvest(); refreshInvest(); } });
-    window.addEventListener('online', () => { if (location.hash === '#/investimenti') refreshInvest(); });
-  }
-
   // ---------- Avviso in basso con "Annulla" ----------
   let toastTimer = 0;
   function toast(msg, undo) {
@@ -1645,7 +1393,6 @@
 
   function wireToday() {
     wireRecap();
-    wireInvest();
     // Aggiungi una spesa: vale per oggi; finisce fra le "spese segnate" della pagina I miei limiti
     const amount = $('tdAmount'), amountErr = $('tdAmountErr');
     amount.addEventListener('input', () => { if (!amountErr.hidden) setFieldErr(amount, amountErr, ''); });
@@ -2674,7 +2421,6 @@
     renderLimits();
     renderCash();
     renderHidden();
-    if (location.hash === '#/investimenti') { renderInvest(); refreshInvest(); }
   }
 
   // ---------- Promemoria calendario (.ics) ----------
