@@ -1158,6 +1158,7 @@ dialog.recap::backdrop { background: rgba(3, 8, 10, .6); -webkit-backdrop-filter
 .inv-table tbody th { font-weight: 500; text-align: left; color: var(--text); }
 .inv-table tbody th small { color: var(--muted); font-size: 13px; margin-left: 4px; }
 .inv-table td b { font-family: var(--display); font-weight: 600; }
+.inv-table .inv-src { display: block; color: var(--muted); font-size: 12px; }
 .inv-ops { list-style: none; margin: 8px 0 0; padding: 0; }
 .inv-ops li { display: grid; grid-template-columns: 96px 1fr auto auto; gap: 12px; align-items: center; min-height: 52px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .inv-ops li:last-child { border-bottom: 0; }

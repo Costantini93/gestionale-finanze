@@ -1388,6 +1388,7 @@
     ['tether', 'USDT', 'Tether'], ['usd-coin', 'USDC', 'USD Coin'],
   ];
   const CG = 'https://api.coingecko.com/api/v3';
+  const CDC = 'https://api.crypto.com/exchange/v1/public/get-tickers?instrument_name=';
   const invState = () => state.invest || (state.invest = { ops: [], prices: {}, hist: {}, custom: {} });
   const coinInfo = id => { const c = INV_COINS.find(x => x[0] === id); if (c) return { id, symbol: c[1], name: c[2] }; const k = invState().custom[id]; return k ? Object.assign({ id }, k) : { id, symbol: id.toUpperCase(), name: id }; };
   const qtyFmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 8 });
@@ -1415,6 +1416,16 @@
     if (!r.ok) throw new Error('CoinGecko ' + r.status);
     return r.json();
   }
+  // Ultimo prezzo di una coppia sull'exchange di Crypto.com (API pubblica, nessun dato personale); null se non c'è
+  async function cdcLast(pair) {
+    try {
+      const r = await fetch(CDC + encodeURIComponent(pair), { headers: { accept: 'application/json' } });
+      if (!r.ok) return null;
+      const j = await r.json(), t = j && j.code === 0 && j.result && j.result.data && j.result.data[0];
+      const v = t ? parseFloat(t.a) : NaN;
+      return v > 0 ? v : null;
+    } catch (e) { return null; }
+  }
   let invFetching = false, invError = '';
   // Prezzi di oggi (al massimo ogni 5 minuti) e storico giornaliero (al massimo ogni 6 ore), solo per le monete possedute
   async function refreshInvest(force) {
@@ -1424,8 +1435,19 @@
     invFetching = true; invError = '';
     try {
       if (force || ids.some(stale)) {
-        const data = await cgGet(`/simple/price?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=eur`);
-        for (const id of ids) if (data[id] && typeof data[id].eur === 'number') S.prices[id] = { eur: data[id].eur, at: now };
+        const data = await cgGet(`/simple/price?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=eur,usd`);
+        for (const id of ids) if (data[id] && typeof data[id].eur === 'number') S.prices[id] = { eur: data[id].eur, at: now, src: 'cg' };
+        // Dove possibile il prezzo viene da Crypto.com (dove sono state comprate le monete): coppia in euro,
+        // altrimenti coppia in dollari convertita con il cambio implicito di CoinGecko. Se non risponde resta CoinGecko.
+        await Promise.all(ids.map(async id => {
+          const sym = coinInfo(id).symbol.toUpperCase(), cg = data[id] || {};
+          let eurPrice = await cdcLast(sym + '_EUR');
+          if (eurPrice === null && cg.eur > 0 && cg.usd > 0) {
+            const usd = await cdcLast(sym + '_USD');
+            if (usd !== null) eurPrice = usd * cg.eur / cg.usd;
+          }
+          if (eurPrice !== null) S.prices[id] = { eur: eurPrice, at: now, src: 'cdc' };
+        }));
       }
       const first = S.ops.reduce((m, o) => !m || o.date < m ? o.date : m, '');
       const days = Math.min(365, Math.max(2, Detector.daysBetween(first, todayIso()) + 2));
@@ -1482,7 +1504,7 @@
         <tbody>${rows.map(({ p, pr, v, gain: g }) => {
           const c = coinInfo(p.coin);
           return `<tr><th scope="row">${esc(c.name)}${c.symbol !== c.name ? ` <small>${esc(c.symbol)}</small>` : ''}</th>
-            <td>${qtyFmt(p.qty)}</td><td>${p.qty > 1e-12 ? priceFmt(p.cost / p.qty) : '–'}</td><td>${pr ? priceFmt(pr.eur) : '–'}</td>
+            <td>${qtyFmt(p.qty)}</td><td>${p.qty > 1e-12 ? priceFmt(p.cost / p.qty) : '–'}</td><td>${pr ? `${priceFmt(pr.eur)}<small class="inv-src">${pr.src === 'cdc' ? 'Crypto.com' : 'CoinGecko'}</small>` : '–'}</td>
             <td><b>${v === null ? '–' : eur.format(v)}</b></td>
             <td class="${g === null ? '' : g >= 0 ? 'pos' : 'neg'}">${g === null ? '–' : `${g >= 0 ? 'guadagno +' : 'perdita −'}${eur.format(Math.abs(g))} (${(p.cost ? Math.abs(g / p.cost * 100) : 0).toLocaleString('it-IT', { maximumFractionDigits: 1 })}%)`}</td>
             <td>${v !== null && value > 0 ? Math.round(v / value * 100) + '%' : '–'}</td></tr>`;
