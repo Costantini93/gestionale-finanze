@@ -1,6 +1,6 @@
 // Service worker: salva l'app sul dispositivo così funziona anche senza connessione.
 // Quando modifichi i file dell'app, aumenta VERSION per far scaricare la nuova versione.
-const VERSION = 'v45';
+const VERSION = 'v46';
 const CACHE = 'abbonamenti-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css', 'css/theme.css',
@@ -27,8 +27,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const sameOrigin = new URL(e.request.url).origin === self.location.origin;
+  if (!sameOrigin) return;                      // prezzi delle crypto e altri servizi esterni: niente copia salvata
   e.respondWith(
-    (sameOrigin ? fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(e.request))
+    fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));
