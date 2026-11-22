@@ -6,3 +6,6 @@ node_modules/
 *.log
 package.json
 package-lock.json
+
+# Output generato dai DGFE (dati di vendita)
+dgfe/*.xlsx
